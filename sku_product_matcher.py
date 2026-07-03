@@ -14,7 +14,7 @@ st.markdown("""
 
 # 1. 文件同时上传
 uploaded_files = st.file_uploader(
-    "📁 请同时选择并上传【广告信息表】和【产品信息表】（按住Ctrl/Cmd可多选）", 
+    "📁 请同时选择并上传【广告信息表】和【产品信息表】（按住Ctrl可多选）", 
     type=["xlsx", "xls", "csv"], 
     accept_multiple_files=True
 )
