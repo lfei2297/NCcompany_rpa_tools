@@ -7,26 +7,47 @@ import streamlit as st
 # 设置页面标题
 st.set_page_config(page_title="Excel整改内容自动拆分工具", layout="wide")
 
-# 【优化】注入CSS以缩小Streamlit组件之间的默认大间隔，并美化布局
+# 注入CSS：精准控制字体大小，突出上传区域，维持整体紧凑性
 st.markdown(
     """
     <style>
-    /* 缩小整体组件间距 */
-    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
-    element-container, div.stMarkdown, div.stButton { margin-bottom: 0.5rem !important; }
-    /* 针对标题和二级标题的特殊紧凑处理 */
-    h1 { margin-bottom: 0.2rem !important; padding-bottom: 0px !important; }
-    h3 { margin-top: 1rem !important; margin-bottom: 0.3rem !important; }
+    .block-container {padding-top: 1.5rem; padding-bottom: 1.5rem;}
+    element-container, div.stMarkdown, div.stButton { margin-bottom: 0.4rem !important; }
+    h1 { margin-bottom: 0.1rem !important; padding-bottom: 0px !important; }
+    
+    /* 弱化模板文本字体（使用正常大小/稍弱颜色） */
+    .template-text {
+        font-size: 14px;
+        color: #666666;
+        margin-bottom: 4px;
+    }
+    
+    /* 强化强化上传文本字体（大一号 + 加粗） */
+    .upload-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #222222;
+        margin-top: 1.2rem;
+        margin-bottom: 4px;
+    }
+    
+    /* 让文件上传框有淡淡的红边轮廓，视觉更加聚焦 */
+    [data-testid="stFileUploader"] {
+        border: 1px solid #ff4b4b33;
+        border-radius: 8px;
+        padding: 4px;
+    }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
+# 页面头部
 st.title("📊 Excel 整改内容清洗与拆分工具")
-st.write("上传你的整改表格，自动识别日期、一变多拆分、去除重复整改类型，并输出标准表格。")
+st.write("自动识别文本中的日期、实现一变多拆分、去除重复整改类型，并按标准字段输出。")
 
-st.subheader("📋 第一步：获取标准模板")
-st.write("为了确保系统能准确识别，请使用下方提供的标准模板进行数据填写：")
+# --- 标准模板下载（平铺展现，但使用正常/弱化字体） ---
+st.markdown('<p class="template-text">💡 规范提示：请使用标准模板的表头字段（真实SKU、虚拟SKU、整改内容）录入数据：</p>', unsafe_allow_html=True)
 
 # 创建内存中的空白模板
 template_buffer = io.BytesIO()
@@ -44,16 +65,16 @@ with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
     template_df.to_excel(writer, index=False)
 template_buffer.seek(0)
 
-# 模板下载按钮
 st.download_button(
-    label="📥 点击下载标准 Excel 模板 (包含示例数据)",
+    label="📥 下载标准 Excel 模板 (含示例数据)",
     data=template_buffer,
     file_name="整改内容导入模板.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-# 【优化】移除了原本导致大空白的 st.write("---") 分割线，直接紧凑衔接下一步
-st.subheader("🚀 第二步：上传并处理表格")
+
+# --- 核心功能区：大字体加粗标题，成为视觉绝对核心 ---
+st.markdown('<p class="upload-title">🚀 导入整改表格</p>', unsafe_allow_html=True)
 
 
 # ================== 核心解析逻辑 ==================
@@ -93,9 +114,9 @@ def parse_rectification_content(content):
     return results
 
 
-# 2. 文件上传组件
+# 文件上传组件（直接作为主视觉）
 uploaded_file = st.file_uploader(
-    "请选择填写好数据的 Excel 文件 (.xlsx)", type=["xlsx"]
+    "请上传需要处理的整改 Excel 文件 (.xlsx)", type=["xlsx"], label_visibility="collapsed"
 )
 
 if uploaded_file is not None:
@@ -108,10 +129,10 @@ if uploaded_file is not None:
 
         if missing_cols:
             st.error(
-                f"❌ 上传失败！检测到列名不匹配。请确认是否修改了模板表头。缺少的列: {', '.join(missing_cols)}"
+                f"❌ 导入失败：表格字段不匹配。请检查是否包含【真实SKU】、【虚拟SKU】、【整改内容】这三列。"
             )
         else:
-            # 3. 数据处理
+            # 数据处理
             new_rows = []
             for index, row in df.iterrows():
                 parsed_data = parse_rectification_content(row["整改内容"])
@@ -126,27 +147,26 @@ if uploaded_file is not None:
                         }
                     )
 
-            # 【优化】重新调整 DataFrame 的列顺序为：日期、真实SKU、虚拟SKU、整改内容、整改类型
+            # 调整最终列顺序
             result_df = pd.DataFrame(new_rows)
             result_df = result_df[
                 ["日期", "真实SKU", "虚拟SKU", "整改内容", "整改类型"]
             ]
 
-            # 【优化】去除了原先展示前5行 dataframe 预览的区域，直接显示成功状态
+            # 成功提示与下载
             st.success(
-                f"🎉 数据处理成功！原表格共 {len(df)} 行，经拆分去重后，新表格共生成了 {len(result_df)} 行数据。"
+                f"🎉 处理完成！原数据 {len(df)} 行 --> 拆分去重后 {len(result_df)} 行。"
             )
 
-            # 4. 生成带时间戳的文件名与二进制流
+            # 生成带时间戳的文件
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            download_filename = f"处理后的表格_{current_time}.xlsx"
+            download_filename = f"处理后的表格_已拆分_{current_time}.xlsx"
 
             output_buffer = io.BytesIO()
             with pd.ExcelWriter(output_buffer, engine="openpyxl") as writer:
                 result_df.to_excel(writer, index=False)
             output_buffer.seek(0)
 
-            # 5. 下载按钮
             st.download_button(
                 label="📥 点击下载处理后的标准结果表格",
                 data=output_buffer,
@@ -155,4 +175,4 @@ if uploaded_file is not None:
             )
 
     except Exception as e:
-        st.error(f"💥 处理文件时发生未知错误: {e}")
+        st.error(f"💥 运行错误: {e}")
