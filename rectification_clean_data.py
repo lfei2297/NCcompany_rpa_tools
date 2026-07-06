@@ -7,33 +7,39 @@ import streamlit as st
 # 设置页面标题
 st.set_page_config(page_title="Excel整改内容自动拆分工具", layout="wide")
 
-# 注入CSS：精准控制字体大小，突出上传区域，维持整体紧凑性
+# 注入CSS：去除奇怪的硬编码偏移，利用卡片和标准的组件间距打造精美布局
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1.5rem; padding-bottom: 1.5rem;}
-    element-container, div.stMarkdown, div.stButton { margin-bottom: 0.4rem !important; }
-    h1 { margin-bottom: 0.1rem !important; padding-bottom: 0px !important; }
+    /* 页面基础边距控制 */
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
     
-    /* 弱化模板文本字体（使用正常大小/稍弱颜色） */
-    .template-text {
+    /* 规范提示小卡片样式 */
+    .template-box {
+        background-color: #f8f9fa;
+        border-left: 4px solid #dcdfe6;
+        padding: 12px 16px;
+        border-radius: 4px;
+        margin-top: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .template-box p {
         font-size: 14px;
-        color: #666666;
-        margin-bottom: 4px;
+        color: #606266;
+        margin: 0 0 8px 0 !important;
     }
     
-    /* 强化强化上传文本字体（大一号 + 加粗） */
+    /* 强化上传大标题 */
     .upload-title {
         font-size: 20px;
         font-weight: 600;
-        color: #222222;
-        margin-top: 1.2rem;
-        margin-bottom: 4px;
+        color: #1f2d3d;
+        margin-bottom: 8px !important;
     }
     
-    /* 让文件上传框有淡淡的红边轮廓，视觉更加聚焦 */
+    /* 文件上传框浅红轮廓 */
     [data-testid="stFileUploader"] {
-        border: 1px solid #ff4b4b33;
+        border: 1px solid #ff4b4b22;
         border-radius: 8px;
         padding: 4px;
     }
@@ -42,13 +48,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 页面头部
+# --- 1. 页面头部 (使用 Streamlit 原生对齐的 title 和 caption) ---
 st.title("📊 Excel 整改内容清洗与拆分工具")
-st.write("自动识别文本中的日期、实现一变多拆分、去除重复整改类型，并按标准字段输出。")
+st.caption("自动识别文本中的日期、实现一变多拆分、去除重复整改类型，并按标准字段输出。")
 
-# --- 标准模板下载（平铺展现，但使用正常/弱化字体） ---
-st.markdown('<p class="template-text">💡 规范提示：请使用标准模板的表头字段（真实SKU、虚拟SKU、整改内容）录入数据：</p>', unsafe_allow_html=True)
-
+# --- 2. 规范与模板区 (改用平铺的轻量卡片包装) ---
 # 创建内存中的空白模板
 template_buffer = io.BytesIO()
 template_df = pd.DataFrame(
@@ -65,6 +69,16 @@ with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
     template_df.to_excel(writer, index=False)
 template_buffer.seek(0)
 
+# 使用自定义 HTML 卡片，把提示和下载按钮完美的包在一起
+st.markdown(
+    '''
+    <div class="template-box">
+        <p>💡 <b>规范提示：</b> 请确保上传的表格表头包含 <b>【真实SKU】、【虚拟SKU】、【整改内容】</b> 三列字段。</p>
+    </div>
+''',
+    unsafe_allow_html=True,
+)
+# 将按钮紧跟在提示文本下方
 st.download_button(
     label="📥 下载标准 Excel 模板 (含示例数据)",
     data=template_buffer,
@@ -73,8 +87,8 @@ st.download_button(
 )
 
 
-# --- 核心功能区：大字体加粗标题，成为视觉绝对核心 ---
-st.markdown('<p class="upload-title">🚀 导入整改表格</p>', unsafe_allow_html=True)
+# --- 3. 核心导入区 (与上方拉开干净的间距) ---
+st.markdown('<p class="upload-title" style="margin-top: 2rem;">🚀 导入整改表格</p>', unsafe_allow_html=True)
 
 
 # ================== 核心解析逻辑 ==================
@@ -114,7 +128,7 @@ def parse_rectification_content(content):
     return results
 
 
-# 文件上传组件（直接作为主视觉）
+# 文件上传组件
 uploaded_file = st.file_uploader(
     "请上传需要处理的整改 Excel 文件 (.xlsx)", type=["xlsx"], label_visibility="collapsed"
 )
@@ -153,9 +167,9 @@ if uploaded_file is not None:
                 ["日期", "真实SKU", "虚拟SKU", "整改内容", "整改类型"]
             ]
 
-            # 成功提示与下载
+            # 成功提示
             st.success(
-                f"🎉 处理完成！原数据 {len(df)} 行 --> 拆分去重后 {len(result_df)} 行。"
+                f"🎉 处理完成！原数据 {len(df)} 行  →  拆分去重后 {len(result_df)} 行。"
             )
 
             # 生成带时间戳的文件
