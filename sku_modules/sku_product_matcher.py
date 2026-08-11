@@ -42,14 +42,22 @@ def process_dataframe(df, file_name):
 
 # ── Streamlit UI ────────────────────────────────────────────────────────────
 def run():
-    st.markdown("""
-    ### 💡 使用指南：
-    1. **同时上传文件**：点击下方上传框，按住 `Ctrl` 键**同时选中**广告表和产品信息表上传。
-    2. **多重条件筛选**：自动按**创建时间最新排序**，筛选**版本名称为'优化组版本-XJP'或'优化组版本-GPTJ'**且**状态==正常**的数据。
-    3. **输入并生成**：粘贴待查的 `虚拟SKU` 和 `国家`（每行一条，可从 Excel 直接复制粘贴），点击按钮即可匹配下载。
-    """)
+    # 改用轻量级卡片式使用指南，减少视觉缝隙
+    st.markdown(
+        """
+        <div style="background-color: #f8f9fa; border-left: 4px solid #409eff; padding: 10px 14px; border-radius: 4px; margin-bottom: 12px;">
+            <p style="margin: 0; font-size: 13px; color: #606266;">
+                💡 <b>使用指南：</b> 
+                1. <b>同时上传</b>：按住 <code>Ctrl</code> 选中广告表和产品信息表上传。<br>
+                2. <b>自动筛选</b>：按创建时间排序，筛选版本为“优化组版本-XJP/GPTJ”且状态为正常的数据。<br>
+                3. <b>生成匹配</b>：粘贴待查的“虚拟SKU 国家”，点击按钮一键导出。
+            </p>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-    # 文件上传
+    # 上传组件直接顶上来
     uploaded_files = st.file_uploader(
         "📁 请同时选择并上传【广告信息表】和【产品信息表】（按住Ctrl可多选）",
         type=["xlsx", "xls", "csv"],

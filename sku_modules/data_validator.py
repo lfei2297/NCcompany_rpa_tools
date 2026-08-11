@@ -246,7 +246,9 @@ def make_template_bytes():
 
 # ── Streamlit UI ────────────────────────────────────────────────────────────
 def run():
-    st.markdown("**验证规则：** 域名映射 + 素材版本数量一致性 + 版本名规律检测（重复/缺失序号）")
+    st.caption(
+        "验证规则：域名映射 ＋ 素材版本数量一致性 ＋ 版本名规律检测（重复/缺失序号）"
+    )
 
     col_t1, col_t2 = st.columns([1, 3])
     with col_t1:
@@ -257,9 +259,10 @@ def run():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     with col_t2:
-        st.caption("下载后直接填入数据，同一SKU的延续行SKU列留空，系统自动归组")
+        st.caption(
+            "下载后直接填入数据，同一SKU的延续行SKU列留空，系统自动归组"
+        )
 
-    st.markdown(" ")
     uploaded_file = st.file_uploader(
         "📂 上传 Excel 文件（.xlsx）",
         type=["xlsx"],
