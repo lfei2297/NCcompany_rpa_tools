@@ -3,7 +3,7 @@ SKU 工具箱 - 主入口
 """
 
 import streamlit as st
-from sku_modules import data_validator, sku_product_matcher, link_matcher
+from sku_modules import data_validator, sku_product_matcher, link_matcher, version_counter
 
 st.set_page_config(page_title="SKU 工具箱", layout="wide")
 
@@ -29,7 +29,7 @@ st.markdown(
 st.sidebar.title("📊 SKU 工具箱")
 app_mode = st.sidebar.radio(
     "选择功能",
-    ["🧪 素材版本验证", "🔗 产品库素材匹配", "🔍 数据交叉核验"],
+    ["🧪 素材版本验证", "🔗 产品库素材匹配", "🔍 数据交叉核验", "🔢 素材版本统计"],
     index=0,
 )
 
@@ -42,3 +42,6 @@ elif app_mode == "🔗 产品库素材匹配":
 elif app_mode == "🔍 数据交叉核验":
     st.title("🔍 通用数据交叉核验工具")
     link_matcher.run()
+elif app_mode == "🔢 素材版本统计":
+    st.title("🔢 素材版本数量自动统计")
+    version_counter.run()
