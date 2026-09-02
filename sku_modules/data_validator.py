@@ -363,7 +363,7 @@ def run():
             df[display_cols]
               .style.map(color_status, subset=["综合状态"])
               .map(color_ver_name, subset=["版本名分析"]),
-            use_container_width=True, height=600, hide_index=True,
+            width="stretch", height=600, hide_index=True,
         )
 
     st.caption("💡 域名/版本数量 FAIL = 需要核查 | WARN = 数据不完整 | PASS = 正常")

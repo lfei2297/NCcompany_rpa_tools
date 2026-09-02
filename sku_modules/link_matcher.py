@@ -146,7 +146,7 @@ def run():
             btn_col1, btn_col2 = st.columns([1, 2])
             with btn_col1:
                 start_btn = st.button(
-                    "🚀 开始匹配校验", type="primary", use_container_width=True
+                    "🚀 开始匹配校验", type="primary", width="stretch"
                 )
 
             # SessionState 记录校验状态，保证下载文件时数据不丢
@@ -207,7 +207,7 @@ def run():
                             data=buffer,
                             file_name=out_filename,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
+                            width="stretch",
                         )
 
                     # --- 步骤 3：下方展示统计面板和明细预览 ---
@@ -261,7 +261,7 @@ def run():
 
                     st.dataframe(
                         display_df,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
 
