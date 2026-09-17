@@ -15,6 +15,48 @@ import streamlit as st
 from batch import run_batch
 from excel_io import make_input_template, read_links, write_results_bytes
 
+
+def parse_pasted_urls(text: str) -> list[str]:
+    if not (text or "").strip():
+        return []
+    raw = (
+        text.replace(",", "\n")
+        .replace(";", "\n")
+        .replace("，", "\n")
+        .replace("；", "\n")
+    )
+    urls: list[str] = []
+    seen: set[str] = set()
+    for line in raw.splitlines():
+        u = line.strip().strip("'\"")
+        if not u or u.lower() in {"url", "链接", "一页商店链接"}:
+            continue
+        key = u.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        urls.append(u)
+    return urls
+
+
+def collect_rows(uploaded, pasted: str) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    if uploaded is not None:
+        for item in read_links(uploaded.getvalue()):
+            key = item["url"].strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append(item)
+    for url in parse_pasted_urls(pasted):
+        key = url.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"url": url, "extra": {}})
+    return rows
+
 st.set_page_config(page_title="单页促销文案排查", page_icon="🧾", layout="wide")
 
 st.markdown(
@@ -33,15 +75,14 @@ st.markdown(
 )
 
 st.title("单页促销文案排查")
-st.caption("广告组 / 店铺组共用（独立站）。系统测算套餐价下促销文案后，仍建议人工扫一眼；包邮等纯文案必须进店核对。")
+st.caption("广告组 / 店铺组共用。系统测算套餐价下促销文案后，仍建议人工扫一眼；包邮等纯文案必须进店核对。")
 
 with st.expander("怎么用", expanded=False):
     st.markdown(
         """
-1. 下载模板，或用现有表：**第一列放单页链接**（落地页或结账页均可）。
-2. 上传后点「开始排查」。
-3. 看两列：**系统检查结果**、**是否人工复核**。
-4. `测算一致` 也请扫一眼页面；`纯文案`（如包邮）系统无法核店铺运费条件，必须人工复核。
+1. **上传 Excel**（第一列链接）或 **粘贴链接**（一行一条），两种都能跑，也可以一起用。
+2. 点「开始排查」。看 **系统检查结果**、**是否人工复核**。
+3. `测算一致` 也请扫一眼页面；`纯文案`（如包邮）必须进店核对运费条件。
         """
     )
 
@@ -52,7 +93,12 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-uploaded = st.file_uploader("上传链接表（.xlsx）", type=["xlsx"])
+uploaded = st.file_uploader("上传链接表（.xlsx，第一列是链接）", type=["xlsx"])
+pasted = st.text_area(
+    "或粘贴链接（一行一条，也可逗号分隔）",
+    height=120,
+    placeholder="https://example.com/pages/news-xxx-m\nhttps://example.com/funnel/checkout-xxx-m",
+)
 workers = st.slider("并发数", 1, 6, 3, help="云上建议 3。链接很多时调低更稳。")
 
 if "result_bytes" not in st.session_state:
@@ -61,15 +107,13 @@ if "result_bytes" not in st.session_state:
     st.session_state.result_table = []
     st.session_state.result_summary = ""
 
-run_btn = st.button("开始排查", type="primary", disabled=uploaded is None)
+has_input = uploaded is not None or bool((pasted or "").strip())
+run_btn = st.button("开始排查", type="primary", disabled=not has_input)
 
 if run_btn:
-    if uploaded is None:
-        st.error("请先上传 Excel。")
-        st.stop()
-    rows = read_links(uploaded.getvalue())
+    rows = collect_rows(uploaded, pasted or "")
     if not rows:
-        st.error("第一列没有读到链接。请确认表头下一行开始是网址。")
+        st.error("没有读到链接。请上传 Excel（第一列是网址），或在粘贴框里填链接。")
         st.stop()
     if len(rows) > 80:
         st.warning(f"本次 {len(rows)} 条，云上可能较慢。建议每批不超过 80 条。")
