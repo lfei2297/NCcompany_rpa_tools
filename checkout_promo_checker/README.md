@@ -15,7 +15,7 @@
 4. **Main file path**：`checkout_promo_checker/app.py`
 5. Deploy 后把新网址发给两个组
 
-根目录 `requirements.txt` 已包含本工具依赖（`streamlit`、`requests`、`openpyxl>=3.1.0`）。Cloud 从仓库根安装依赖。
+Cloud **只读仓库根目录** `requirements.txt` 装包，不会读本目录 README。根文件里已包含：`streamlit`、`pandas`、`requests`、`openpyxl>=3.1.0`（Excel 富文本需要 3.1+）。
 
 ## 本地
 

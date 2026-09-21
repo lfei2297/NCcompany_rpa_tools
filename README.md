@@ -14,3 +14,18 @@ NC 提效工具。同一个仓库里挂多个独立 Streamlit 站（Main file �
 部署：Streamlit Cloud → New app → 仍选本仓库 → **Main file path** 填 `checkout_promo_checker/app.py`（不要覆盖现有两个站）。
 
 同事打开新地址即可，无需装 Python。详见 `checkout_promo_checker/README.md`。
+
+## 依赖
+
+Streamlit Cloud **只安装仓库根目录**的 `requirements.txt`，不会读子目录 README，也不会读 `checkout_promo_checker/` 里的文件来装包。
+
+当前根目录依赖：
+
+```
+streamlit
+pandas
+openpyxl>=3.1.0
+requests
+```
+
+`openpyxl>=3.1.0` 是促销文案排查这次升级需要的（Excel 单元格富文本）。改依赖必须改这个根文件，否则 Cloud 会继续用旧包。
