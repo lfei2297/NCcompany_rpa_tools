@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from fetcher import FetchError, fetch_html, normalize_url
 from parser import (
+    LOC_LABELS,
     collect_checkout_candidates,
     extract_page_config,
     is_checkout_url,
@@ -20,6 +21,8 @@ from reason import (
     classify_page,
     evaluate_offer,
     extract_priced_offers,
+    format_verdict_rows,
+    parse_claim,
     summarize,
 )
 
@@ -43,7 +46,10 @@ class CheckResult:
     system_result: str = SYS_FAIL
     need_review: str = REVIEW_YES
     promo_texts: list[str] = field(default_factory=list)
+    locations: list[str] = field(default_factory=list)
+    has_shipping: str = REVIEW_NO
     reason_detail: str = ""
+    verdict_rows: list[dict] = field(default_factory=list)
     note: str = ""
     extra: dict = field(default_factory=dict)
 
@@ -54,7 +60,11 @@ class CheckResult:
 
     @property
     def promo_text_joined(self) -> str:
-        return " | ".join(self.promo_texts)
+        return "\n".join(self.promo_texts)
+
+    @property
+    def locations_joined(self) -> str:
+        return "、".join(self.locations)
 
 
 def _try_fetch_checkout(candidates: list[str]) -> tuple[str, str, list | None, str]:
@@ -116,26 +126,43 @@ def check_one(raw_url: str) -> CheckResult:
         out.copy_type = TYPE_NONE
         out.system_result = SYS_NONE
         out.need_review = REVIEW_NO
-        out.note = "套餐价格下方无促销文案。"
+        out.note = "结账页未发现促销文案（价下方、规格名称、规格标签、顶栏）。"
         return out
 
-    out.promo_texts = list(dict.fromkeys(o.price_tag for o in offers))
-    out.copy_type = classify_page(out.promo_texts)
+    out.promo_texts = list(
+        dict.fromkeys(
+            f"{LOC_LABELS.get(o.location, o.location)}：{o.price_tag}"
+            if o.location
+            else o.price_tag
+            for o in offers
+        )
+    )
+    locs: list[str] = []
+    for o in offers:
+        lab = LOC_LABELS.get(o.location, o.location)
+        if lab and lab not in locs:
+            locs.append(lab)
+    out.locations = locs
+    out.copy_type = classify_page([o.price_tag for o in offers])
     verdicts = [evaluate_offer(o) for o in offers]
     overall, detail = summarize(verdicts)
     out.reason_detail = detail
-    # 只要有套餐价下文案，都建议人工扫一眼；纯文案（包邮等）必须复核，系统进不了店看运费条件
+    out.verdict_rows = format_verdict_rows(verdicts)
+    has_shipping = any(parse_claim(o.price_tag).free_shipping for o in offers)
+    out.has_shipping = REVIEW_YES if has_shipping else REVIEW_NO
+    # 只要有套餐价下文案，都建议人工扫一眼；包邮必须进店核对运费
     out.need_review = REVIEW_YES
+    ship_note = " 含包邮文案，运费条件须进店核对。" if has_shipping else ""
     if overall == UNREASONABLE:
         out.system_result = SYS_MISMATCH
-        out.note = "价格测算与文案不符。"
+        out.note = "价格测算与文案不符。" + ship_note
     elif overall == REASONABLE:
         out.system_result = SYS_MATCH
-        out.note = "价格测算一致，仍建议人工扫一眼页面展示。"
+        out.note = "价格测算一致，仍建议人工扫一眼页面展示。" + ship_note
     elif overall == NOT_PRICE or out.copy_type == TYPE_PURE:
         out.system_result = SYS_PURE
         out.note = "非折扣/非每件价格的纯文案（如包邮），系统无法核对店铺运费条件，需人工复核。"
     else:
         out.system_result = SYS_CALC_FAIL
-        out.note = "无法按现价完整验算，需人工复核。"
+        out.note = "无法按现价完整验算，需人工复核。" + ship_note
     return out

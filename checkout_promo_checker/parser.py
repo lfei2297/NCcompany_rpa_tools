@@ -286,6 +286,16 @@ def _header_top_text(cfg: list) -> str:
 
 
 PROMO_LOCATION = "套餐价格下方"
+LOC_PRICE = PROMO_LOCATION
+LOC_SPEC = "规格名称"
+LOC_BADGE = "规格标签"
+LOC_HEADER = "顶栏"
+LOC_LABELS = {
+    LOC_PRICE: "价下方",
+    LOC_SPEC: "规格名",
+    LOC_BADGE: "规格标签",
+    LOC_HEADER: "顶栏",
+}
 
 
 def _price_tag_texts(value) -> list[str]:
@@ -313,10 +323,10 @@ def _price_tag_texts(value) -> list[str]:
 
 
 def extract_copy_snippets(cfg: list | None, html: str = "") -> list[tuple[str, str]]:
-    """只抽取套餐售价下方的促销文案（skuConfig.priceTags）。
+    """抽取结账页促销文案：价下 priceTags、规格名、规格标签、顶栏。
 
-    对应结账页每个套餐卡片上，红色现价下面那一行，例如「🔥 only $8.62 each!」。
-    不扫顶栏、Best Seller、评论、FAQ。
+    对应 SKU 新布局卡片上的价下文案、规格里的 Save X% OFF、
+    以及标签/顶栏里带价格或折扣的文案。Best Seller 等非价格标签不收录。
     """
     snippets: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -329,14 +339,20 @@ def extract_copy_snippets(cfg: list | None, html: str = "") -> list[tuple[str, s
         snippets.append((location, t))
 
     if cfg:
+        header = _header_top_text(cfg)
+        if header and match_promo(header):
+            add(LOC_HEADER, header)
         for path, v in walk(cfg):
             if should_skip_path(path):
                 continue
             leaf = path.split(".")[-1].lower()
-            if leaf not in ("pricetags", "pricetag"):
-                continue
-            for text in _price_tag_texts(v):
-                add(PROMO_LOCATION, text)
+            if leaf in ("pricetags", "pricetag"):
+                for text in _price_tag_texts(v):
+                    add(LOC_PRICE, text)
+            elif leaf in ("titletags", "titletag"):
+                for text in _price_tag_texts(v):
+                    if match_promo(text):
+                        add(LOC_BADGE, text)
 
     return snippets
 

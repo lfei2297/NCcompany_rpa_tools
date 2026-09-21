@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         if item.promo_texts:
             print(f"         类型:{item.copy_type}  文案: {item.promo_text_joined[:160]}")
         if item.reason_detail:
-            print(f"         测算: {item.reason_detail[:220]}")
+            for line in item.reason_detail.splitlines():
+                print(f"         {line}")
 
     results = run_batch([r["url"] for r in rows], workers=args.workers, progress=progress)
     paired = list(zip(results, [r["extra"] for r in rows]))
