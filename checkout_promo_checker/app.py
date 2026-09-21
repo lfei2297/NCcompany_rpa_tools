@@ -325,14 +325,21 @@ if st.session_state.result_summary:
 
         html = f"""
 <style>
-  html, body {{ margin: 0; padding: 8px 0 0; background: transparent; }}
-  .pw {{ font-family: Calibri, "Microsoft YaHei", sans-serif; font-size: 13px; color: #222; }}
-  .pw table {{ width: 100%; border-collapse: collapse; }}
+  html, body {{ margin: 0; padding: 0; background: #fff; overflow: auto; }}
+  * {{ box-sizing: border-box; }}
+  .pw {{
+    font-family: Calibri, "Microsoft YaHei", sans-serif; font-size: 13px; color: #222;
+    width: 100%;
+  }}
+  .pw table {{
+    width: 100%; min-width: 720px; border-collapse: collapse; table-layout: fixed;
+  }}
   .pw thead th {{
     background: #305496; color: #fff; font-weight: 700; text-align: left;
-    padding: 0; position: relative; white-space: nowrap; border-right: 1px solid #4a6eab;
+    padding: 0; position: sticky; top: 0; z-index: 5;
+    white-space: nowrap; border-right: 1px solid #4a6eab;
   }}
-  .pw .th-in {{ display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 6px 8px; gap: 4px; }}
+  .pw .th-in {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 6px 8px 10px; gap: 4px; }}
   .pw .arr {{
     background: transparent; border: 0; color: #fff; cursor: pointer;
     font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 2px;
@@ -342,7 +349,7 @@ if st.session_state.result_summary:
   .pw .panel {{
     display: none; position: absolute; top: 100%; left: 0; z-index: 20;
     background: #fff; color: #222; border: 1px solid #b0b0b0;
-    box-shadow: 0 2px 8px rgba(0,0,0,.18); min-width: 160px; max-width: 240px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); min-width: 160px; max-width: 260px;
     padding: 8px; text-align: left; font-weight: 400; white-space: normal;
   }}
   .pw .panel label {{ display: block; font-size: 12px; margin: 3px 0; cursor: pointer; }}
@@ -350,15 +357,25 @@ if st.session_state.result_summary:
     width: 100%; box-sizing: border-box; margin-bottom: 6px; padding: 4px 6px;
     border: 1px solid #ccc; font-size: 12px;
   }}
-  .pw td {{ padding: 7px 8px; border: 1px solid #d0d7e2; vertical-align: top; background: #fff; }}
+  .pw td {{
+    padding: 8px 10px; border: 1px solid #d0d7e2; vertical-align: top; background: #fff;
+    word-break: break-word; line-height: 1.45;
+  }}
   .pw tbody tr:nth-child(even) td {{ background: #f7f9fc; }}
   .mark-ok {{ color: #2e7d32; font-weight: 700; }}
   .mark-bad {{ color: #d32f2f; font-weight: 700; }}
   .mark-ship {{ color: #d32f2f; font-weight: 700; }}
-  .pw .cnt {{ color: #666; font-size: 12px; margin: 6px 0 0; }}
+  .pw .cnt {{ color: #666; font-size: 12px; margin: 8px 0 0; }}
 </style>
 <div class="pw" id="{uid}-wrap">
 <table>
+<colgroup>
+  <col style="width:72px">
+  <col style="width:18%">
+  <col style="width:88px">
+  <col style="width:28%">
+  <col>
+</colgroup>
 <thead><tr>
 {th("结论", uid + "-p0", st_checks)}
 {th("规格", uid + "-p1", '<input type="text" id="' + uid + '-q1" placeholder="搜索规格">')}
@@ -414,13 +431,6 @@ if st.session_state.result_summary:
       }});
       btn.classList.toggle('filtered', filtered);
     }});
-    resize();
-  }}
-  function resize() {{
-    var h = Math.max(root.scrollHeight + 12, 160);
-    try {{
-      if (window.frameElement) window.frameElement.style.height = h + 'px';
-    }} catch (e) {{}}
   }}
   root.querySelectorAll('.arr').forEach(function(btn) {{
     btn.addEventListener('click', function(e) {{
@@ -429,7 +439,6 @@ if st.session_state.result_summary:
       root.querySelectorAll('.panel').forEach(function(p) {{
         p.style.display = (p.id === id && p.style.display !== 'block') ? 'block' : 'none';
       }});
-      resize();
     }});
   }});
   root.querySelectorAll('.panel input').forEach(function(inp) {{
@@ -449,8 +458,13 @@ if st.session_state.result_summary:
         visible = (
             sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
         )
-        height = max(200, min(480, 90 + 40 * max(visible, 3)))
-        components.html(html, height=height, scrolling=True)
+        # iframe 高度必须一次定死：JS 改 iframe 高度后，Streamlit 外框仍按原高度留白，
+        # 表会被压在顶部并挤在一起。
+        n = max(visible, 1)
+        content_h = 52 + 48 * n + 40
+        max_h = 640
+        height = max(180, min(max_h, content_h))
+        components.html(html, height=height, scrolling=content_h > max_h)
         return True
 
     def render_group(items: list[dict], expand_first: bool):
