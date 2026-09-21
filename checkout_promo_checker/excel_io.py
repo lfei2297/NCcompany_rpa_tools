@@ -8,10 +8,20 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.cell.rich_text import CellRichText, TextBlock
-from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+
+try:
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    _HAS_RICH = True
+    _RED_FONT = InlineFont(color="FF0000", b=True)
+except ImportError:  # openpyxl < 3.1 没有单元格富文本
+    CellRichText = None  # type: ignore
+    TextBlock = None  # type: ignore
+    _HAS_RICH = False
+    _RED_FONT = None
 
 from checker import (
     SYS_CALC_FAIL,
@@ -52,13 +62,12 @@ HEADERS = [
 WRAP_ALIGN = Alignment(wrap_text=True, vertical="top")
 WRAP_COLS = {"促销文案", "测算说明"}
 HIGHLIGHT_RE = re.compile(r"(不符|包邮|Free\s+Shipping)", re.I)
-_RED_FONT = InlineFont(color="FF0000", b=True)
 
 
 def cell_plain_text(value) -> str:
     if value is None:
         return ""
-    if isinstance(value, CellRichText):
+    if _HAS_RICH and isinstance(value, CellRichText):
         return "".join(str(p) for p in value)
     return str(value)
 
@@ -75,10 +84,10 @@ def excel_multiline(text) -> str:
     return t.strip()
 
 
-def to_rich_text(text) -> str | CellRichText:
-    """「不符」「包邮」标红，其余保持原样。"""
+def to_rich_text(text):
+    """「不符」「包邮」标红，其余保持原样。openpyxl<3.1 时退回纯文本。"""
     t = excel_multiline(text)
-    if not t or not HIGHLIGHT_RE.search(t):
+    if not t or not HIGHLIGHT_RE.search(t) or not _HAS_RICH:
         return t
     blocks: list = []
     pos = 0
@@ -290,8 +299,14 @@ def rewrite_workbook_wrap(wb) -> None:
         ws.row_dimensions[r].height = tallest
 
 
+def _load_workbook(source, **kwargs):
+    if _HAS_RICH:
+        kwargs.setdefault("rich_text", True)
+    return load_workbook(source, **kwargs)
+
+
 def rewrite_result_bytes(data: bytes) -> bytes:
-    wb = load_workbook(io.BytesIO(data), rich_text=True)
+    wb = _load_workbook(io.BytesIO(data))
     rewrite_workbook_wrap(wb)
     buf = io.BytesIO()
     wb.save(buf)
@@ -301,7 +316,7 @@ def rewrite_result_bytes(data: bytes) -> bytes:
 def rewrite_result_xlsx(path: str | Path) -> Path:
     """把已导出表的「促销文案 / 测算说明」改成单元格内换行。"""
     path = Path(path)
-    wb = load_workbook(path, rich_text=True)
+    wb = _load_workbook(path)
     rewrite_workbook_wrap(wb)
     wb.save(path)
     return path
