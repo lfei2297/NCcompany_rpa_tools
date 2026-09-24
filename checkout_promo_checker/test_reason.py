@@ -488,6 +488,35 @@ def test_header_only_new_layout():
     print("header-only ok")
 
 
+def test_currency_unit_mismatch():
+    c = parse_claim("🔥Only $16.66 each")
+    assert c.each_prices == [Decimal("16.66")]
+    assert c.money_units == ["$"]
+    c = parse_claim("Only €16,66 each")
+    assert c.each_prices == [Decimal("16.66")], c.each_prices
+    assert c.money_units == ["€"]
+    c = parse_claim("Only €18.49 each")
+    assert c.each_prices == [Decimal("18.49")]
+
+    common = dict(
+        sku="WO2437037-狗粮秤*3",
+        label="3 PCS",
+        attr="3 PCS",
+        title="3 PCS",
+        product_title="",
+        price=Decimal("49.99"),
+        regular=Decimal("98.99"),
+    )
+    bad = evaluate_offer(offer(price_tag="🔥Only $16.66 each", currency="EUR", **common))
+    assert bad.status == "文案不合理", bad.detail
+    assert "货币单位不一致" in bad.detail
+
+    good = evaluate_offer(offer(price_tag="🔥Only €16.66 each", currency="EUR", **common))
+    assert good.status == "文案合理", good.detail
+    assert "不一致" not in good.detail
+    print("currency mismatch ok")
+
+
 def test_helpers():
     assert money_matches(Decimal("8.62375"), Decimal("8.62"))
     assert percent_matches(Decimal("49.45"), Decimal("49"))
@@ -516,5 +545,6 @@ if __name__ == "__main__":
     test_bundle_save_vs_singles()
     test_header_does_not_veto_page()
     test_header_only_new_layout()
+    test_currency_unit_mismatch()
     test_helpers()
     print("all reason tests ok")

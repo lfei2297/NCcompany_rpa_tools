@@ -8,6 +8,7 @@
 - 规格名称里的 Save N% / N% OFF：相对「单独买各规格现价合计」，不是划线价
   （只看十分位：0–4 舍、5–9 入；第二位不向前进位。49.45% 应写 49% OFF；32.90% 应写 33% OFF）
 金额按文案小数位四舍五入，允许 0.02 元误差；折扣不设区间，必须等于按第一位四舍五入后的整数。
+规格价的货币（店铺 currency，如 EUR→€）和促销文案里的货币符号不一致时，记为不符。
 """
 
 from __future__ import annotations
@@ -77,13 +78,133 @@ def _dec(value) -> Decimal | None:
         return None
 
 
-def _money(value: Decimal, places: int = 2) -> str:
+def _money(value: Decimal, places: int = 2, symbol: str = "$") -> str:
     if places <= 0:
         step = Decimal("1")
     else:
         step = Decimal("1").scaleb(-places)
     q = value.quantize(step, rounding=ROUND_HALF_UP)
-    return f"${q}"
+    return f"{symbol}{q}"
+
+
+_PAGE_UNITS: dict[str, set[str]] = {
+    "USD": {"$", "US$"},
+    "EUR": {"€"},
+    "GBP": {"£"},
+    "JPY": {"¥"},
+    "CNY": {"¥"},
+    "AUD": {"$", "A$"},
+    "CAD": {"$", "C$"},
+    "NZD": {"$", "NZ$"},
+    "HKD": {"$", "HK$"},
+    "SGD": {"$", "S$"},
+    "TWD": {"$", "NT$"},
+    "MXN": {"$"},
+    "BRL": {"$", "R$"},
+    "CHF": {"CHF"},
+}
+
+_PAGE_LABEL = {
+    "USD": "$（USD）",
+    "EUR": "€（EUR）",
+    "GBP": "£（GBP）",
+    "JPY": "¥（JPY）",
+    "CNY": "¥（CNY）",
+    "AUD": "$（AUD）",
+    "CAD": "$（CAD）",
+    "NZD": "$（NZD）",
+    "HKD": "$（HKD）",
+    "SGD": "$（SGD）",
+    "TWD": "NT$（TWD）",
+    "MXN": "$（MXN）",
+    "BRL": "R$（BRL）",
+    "CHF": "CHF",
+}
+
+_UNIT_ALIAS = {
+    "$": "$",
+    "US$": "US$",
+    "USD": "US$",
+    "€": "€",
+    "EUR": "€",
+    "£": "£",
+    "GBP": "£",
+    "¥": "¥",
+    "￥": "¥",
+    "JPY": "¥",
+    "CNY": "¥",
+    "A$": "A$",
+    "AU$": "A$",
+    "AUD": "A$",
+    "C$": "C$",
+    "CA$": "C$",
+    "CAD": "C$",
+    "NZ$": "NZ$",
+    "NZD": "NZ$",
+    "HK$": "HK$",
+    "HKD": "HK$",
+    "S$": "S$",
+    "SGD": "S$",
+    "NT$": "NT$",
+    "TWD": "NT$",
+    "R$": "R$",
+    "BRL": "R$",
+    "CHF": "CHF",
+}
+
+_UNIT_TOKEN = (
+    r"US\$|AU\$|A\$|CA\$|C\$|NZ\$|HK\$|S\$|NT\$|R\$|"
+    r"€|£|¥|￥|\$|"
+    r"\b(?:USD|EUR|GBP|AUD|CAD|NZD|HKD|SGD|TWD|JPY|CNY|BRL|CHF)\b"
+)
+_UNIT_RE = re.compile(
+    rf"(?:({_UNIT_TOKEN})\s*\d|\d\s*({_UNIT_TOKEN}))",
+    re.I,
+)
+_CUR_PREFIX = r"(?:US\$|AU\$|A\$|CA\$|C\$|NZ\$|HK\$|S\$|NT\$|R\$|€|£|¥|￥|\$)"
+_AMT = r"(\d+(?:[.,]\d+)?)"
+
+
+def currency_symbol(code: str) -> str:
+    """店铺货币在测算说明里用的符号。未识别时仍用 $，和旧结果一致。"""
+    return {
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+        "CNY": "¥",
+        "BRL": "R$",
+        "TWD": "NT$",
+        "CHF": "CHF",
+    }.get((code or "").strip().upper(), "$")
+
+
+def _norm_unit(token: str) -> str:
+    return _UNIT_ALIAS.get(token.upper(), token.upper())
+
+
+def _amount(raw: str) -> Decimal:
+    text = raw.strip()
+    if re.fullmatch(r"\d+,\d{1,2}", text):
+        text = text.replace(",", ".")
+    else:
+        text = text.replace(",", "")
+    return Decimal(text)
+
+
+def currency_conflict_text(page_code: str, units: list[str]) -> str:
+    """规格价货币和文案货币不是同一单位时，返回不符说明。"""
+    code = (page_code or "").strip().upper()
+    allowed = _PAGE_UNITS.get(code)
+    if not allowed or not units:
+        return ""
+    bad: list[str] = []
+    for unit in units:
+        if unit not in allowed and unit not in bad:
+            bad.append(unit)
+    if not bad:
+        return ""
+    page = _PAGE_LABEL.get(code, code)
+    return f"规格价货币为{page}，文案货币为{'、'.join(bad)}，货币单位不一致（不符）"
 
 
 def _round_to(value: Decimal, places: int) -> Decimal:
@@ -127,6 +248,7 @@ class Claim:
     percents: list[Decimal] = field(default_factory=list)
     each_prices: list[Decimal] = field(default_factory=list)
     set_prices: list[Decimal] = field(default_factory=list)
+    money_units: list[str] = field(default_factory=list)
     free_shipping: bool = False
     has_numeric: bool = False
 
@@ -159,26 +281,45 @@ def parse_claim(text: str) -> Claim:
         _push_unique(claim.percents, off)
         claim.has_numeric = True
 
-    # $X/each 或 only $X each
     for m in re.finditer(
-        r"(?:only\s*)?\$\s*(\d+(?:\.\d+)?)\s*(?:/|\s+)?each\b",
+        rf"(?:only\s*)?{_CUR_PREFIX}\s*{_AMT}\s*(?:/|\s+)?each\b",
         t,
         re.I,
     ):
-        _push_unique(claim.each_prices, Decimal(m.group(1)))
+        _push_unique(claim.each_prices, _amount(m.group(1)))
         claim.has_numeric = True
     for m in re.finditer(
-        r"(?:only\s*)?\$\s*(\d+(?:\.\d+)?)\s*/\s*set\b",
+        rf"(?:only\s*)?{_AMT}\s*(?:€|£|¥|￥)\s*(?:/|\s+)?each\b",
         t,
         re.I,
     ):
-        _push_unique(claim.set_prices, Decimal(m.group(1)))
+        _push_unique(claim.each_prices, _amount(m.group(1)))
         claim.has_numeric = True
-    # 文案只有 only $X，没有 each/set，也按单价/件处理
+    for m in re.finditer(
+        rf"(?:only\s*)?{_CUR_PREFIX}\s*{_AMT}\s*/\s*set\b",
+        t,
+        re.I,
+    ):
+        _push_unique(claim.set_prices, _amount(m.group(1)))
+        claim.has_numeric = True
+    for m in re.finditer(
+        rf"(?:only\s*)?{_AMT}\s*(?:€|£|¥|￥)\s*/\s*set\b",
+        t,
+        re.I,
+    ):
+        _push_unique(claim.set_prices, _amount(m.group(1)))
+        claim.has_numeric = True
     if not claim.each_prices and not claim.set_prices:
-        for m in re.finditer(r"only\s*\$\s*(\d+(?:\.\d+)?)", t, re.I):
-            _push_unique(claim.each_prices, Decimal(m.group(1)))
+        for m in re.finditer(rf"only\s*{_CUR_PREFIX}\s*{_AMT}", t, re.I):
+            _push_unique(claim.each_prices, _amount(m.group(1)))
             claim.has_numeric = True
+        for m in re.finditer(rf"only\s*{_AMT}\s*(?:€|£|¥|￥)", t, re.I):
+            _push_unique(claim.each_prices, _amount(m.group(1)))
+            claim.has_numeric = True
+    for m in _UNIT_RE.finditer(t):
+        token = m.group(1) or m.group(2)
+        if token:
+            _push_unique(claim.money_units, _norm_unit(token))
     return claim
 
 
@@ -313,6 +454,7 @@ class PricedOffer:
     sku_meta: dict = field(default_factory=dict)
     peers: list = field(default_factory=list)
     standalone_total: Decimal | None = None
+    currency: str = ""
 
 
 def _static_meta(cfg: list | None) -> dict:
@@ -385,9 +527,20 @@ def _match_variant(sku: dict, variants: list, index: int, by_id: dict[str, dict]
     return {}
 
 
+def _meta_currency(meta: dict) -> str:
+    for src in (meta, meta.get("setting") or {}, meta.get("product") or {}):
+        if not isinstance(src, dict):
+            continue
+        val = src.get("currency")
+        if isinstance(val, str) and val.strip():
+            return val.strip().upper()
+    return ""
+
+
 def _sku_rows(cfg: list | None) -> list[PricedOffer]:
     """SKU 新布局按 skuConfig.ID 对齐 variants，避免推荐套餐排在前面时对错价。"""
     meta = _static_meta(cfg)
+    currency = _meta_currency(meta)
     product = meta.get("product") or {}
     setting = meta.get("setting") or {}
     variants = [v for v in (product.get("variants") or []) if isinstance(v, dict)]
@@ -418,6 +571,7 @@ def _sku_rows(cfg: list | None) -> list[PricedOffer]:
                 product_title=product_title,
                 location=LOC_PRICE,
                 sku_meta=sku,
+                currency=currency,
             )
         )
     return rows
@@ -467,6 +621,7 @@ def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
                 product_title=row.product_title,
                 location=location,
                 standalone_total=row.standalone_total,
+                currency=row.currency,
             )
         )
 
@@ -496,6 +651,7 @@ def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
                 product_title=rows[0].product_title if rows else "",
                 location=LOC_HEADER,
                 peers=priced or list(rows),
+                currency=(priced[0].currency if priced else (rows[0].currency if rows else "")),
             )
         )
 
@@ -522,7 +678,19 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
     claim = parse_claim(offer.price_tag)
     bits: list[str] = []
     statuses: list[str] = []
+    page_sym = currency_symbol(offer.currency)
+    claim_sym = claim.money_units[0] if claim.money_units else page_sym
+    conflict = currency_conflict_text(offer.currency, claim.money_units)
 
+    if not claim.has_numeric and conflict:
+        return OfferVerdict(
+            offer.price_tag,
+            offer.label,
+            UNREASONABLE,
+            conflict,
+            location=offer.location or LOC_PRICE,
+            calc=conflict,
+        )
     if not claim.has_numeric and not claim.free_shipping:
         return OfferVerdict(offer.price_tag, offer.label, UNCHECKABLE, "文案没有可测算的价格或折扣数字")
     if not claim.has_numeric and claim.free_shipping:
@@ -543,7 +711,7 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
         if use_bundle:
             base = offer.standalone_total
             actual = (base - offer.price) / base * 100
-            base_desc = f"单独买合计{_money(base)}→套餐现价{_money(offer.price)}"
+            base_desc = f"单独买合计{_money(base, symbol=page_sym)}→套餐现价{_money(offer.price, symbol=page_sym)}"
         elif offer.price is None or offer.regular is None or offer.regular <= 0:
             statuses.append(UNCHECKABLE)
             bits.append("有折扣%但缺少现价或划线价，无法验算")
@@ -553,7 +721,7 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
         else:
             base = offer.regular
             actual = (offer.regular - offer.price) / offer.regular * 100
-            base_desc = f"划线价{_money(offer.regular)}→现价{_money(offer.price)}"
+            base_desc = f"划线价{_money(offer.regular, symbol=page_sym)}→现价{_money(offer.price, symbol=page_sym)}"
         if actual is not None and base is not None:
             shown = actual.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
             expected = expected_off_percent(actual)
@@ -580,8 +748,8 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
                 statuses.append(REASONABLE if ok else UNREASONABLE)
                 mark = "符合" if ok else "不符"
                 bits.append(
-                    f"现价{_money(offer.price)}÷{pieces}件={_money(actual, 4)}，"
-                    f"文案{_money(claimed)}/件（{mark}）"
+                    f"现价{_money(offer.price, symbol=page_sym)}÷{pieces}件={_money(actual, 4, symbol=page_sym)}，"
+                    f"文案{_money(claimed, symbol=claim_sym)}/件（{mark}）"
                 )
 
     if claim.set_prices:
@@ -599,9 +767,13 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
                 statuses.append(REASONABLE if ok else UNREASONABLE)
                 mark = "符合" if ok else "不符"
                 bits.append(
-                    f"现价{_money(offer.price)}÷{sets}套={_money(actual, 4)}，"
-                    f"文案{_money(claimed)}/套（{mark}）"
+                    f"现价{_money(offer.price, symbol=page_sym)}÷{sets}套={_money(actual, 4, symbol=page_sym)}，"
+                    f"文案{_money(claimed, symbol=claim_sym)}/套（{mark}）"
                 )
+
+    if conflict:
+        statuses.append(UNREASONABLE)
+        bits.append(conflict)
 
     if UNREASONABLE in statuses:
         status = UNREASONABLE
@@ -644,6 +816,7 @@ def _evaluate_header(offer: PricedOffer) -> OfferVerdict:
             title=row.title,
             product_title=row.product_title,
             location=LOC_HEADER,
+            currency=row.currency or offer.currency,
         )
         v = evaluate_offer(sub)
         statuses.append(v.status)
