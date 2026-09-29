@@ -372,3 +372,13 @@ def looks_like_checkout_config(cfg: list | None) -> bool:
     tags = {(x.get("tag") or "").lower() for x in cfg if isinstance(x, dict)}
     keys = {(x.get("key") or "").lower() for x in cfg if isinstance(x, dict)}
     return bool({"header", "order", "quickorder", "banner"} & (tags | keys))
+
+
+def has_order_module(cfg: list | None) -> bool:
+    """页面自带下单模块。路径里没有 checkout 的一页结账靠这个识别。"""
+    if not cfg:
+        return False
+    for item in cfg:
+        if isinstance(item, dict) and str(item.get("tag") or "").lower() == "order":
+            return True
+    return False

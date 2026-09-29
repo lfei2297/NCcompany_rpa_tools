@@ -3,6 +3,7 @@
 检测位置：套餐价下方、规格名称、规格标签、顶栏（含价格或折扣时）。
 规则：
 - only $X each / $X/each：现价 ÷ 件数 ≈ 文案单价
+  （SKU 写明一份数量时相乘：4件*2 → 8；60set*2 → 120；30set+60set → 90）
 - $X/set：现价 ÷ 套数 ≈ 文案套价
 - N% OFF（价下方 / 顶栏 / 标签）：相对划线价
 - 规格名称里的 Save N% / N% OFF：相对「单独买各规格现价合计」，不是划线价
@@ -87,6 +88,7 @@ def _money(value: Decimal, places: int = 2, symbol: str = "$") -> str:
     return f"{symbol}{q}"
 
 
+# 裸 $ 视为美元符号，和同样用 $ 展示的币种兼容；写明 US$/A$/€ 则按该符号比对。
 _PAGE_UNITS: dict[str, set[str]] = {
     "USD": {"$", "US$"},
     "EUR": {"€"},
@@ -281,6 +283,7 @@ def parse_claim(text: str) -> Claim:
         _push_unique(claim.percents, off)
         claim.has_numeric = True
 
+    # $X/each、€X each，或金额在后的 16,66 € each
     for m in re.finditer(
         rf"(?:only\s*)?{_CUR_PREFIX}\s*{_AMT}\s*(?:/|\s+)?each\b",
         t,
@@ -309,6 +312,7 @@ def parse_claim(text: str) -> Claim:
     ):
         _push_unique(claim.set_prices, _amount(m.group(1)))
         claim.has_numeric = True
+    # 文案只有 only $X / only €X，没有 each/set，也按单价/件处理
     if not claim.each_prices and not claim.set_prices:
         for m in re.finditer(rf"only\s*{_CUR_PREFIX}\s*{_AMT}", t, re.I):
             _push_unique(claim.each_prices, _amount(m.group(1)))
@@ -342,10 +346,138 @@ def _attr_text(variant: dict) -> str:
     return " ".join(parts)
 
 
-def infer_piece_count(sku: str, attr: str, title: str, product_title: str) -> int | None:
-    m = re.search(r"(\d+)\s*件(?:\s*\*\s*(\d+))?", sku or "")
+def _sold_as_sets(attr: str, title: str) -> bool:
+    """规格按套出售：写了 N sets，或选项名以 *N 结尾。set of N 仍按里面的件数。"""
+    blob = f"{attr or ''} {title or ''}"
+    if re.search(r"set of\s+\d+", blob, re.I):
+        return False
+    if re.search(r"\d+\s*sets?\b", blob, re.I):
+        return True
+    for src in (attr, title):
+        if re.search(r"\*\s*\d+\s*$", (src or "").strip()):
+            return True
+    return False
+
+
+def _pieces_in_one_set(*texts: str) -> int | None:
+    """一套里有几件。来自 Set of N、N Sets/bag、N pcs/set，不看 SKU 编码。"""
+    for text in texts:
+        if not text:
+            continue
+        m = re.search(r"set of\s+(\d+)", text, re.I)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(\d+)\s*(?:pcs?|pieces?)\s*/\s*set\b", text, re.I)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(\d+)\s*sets?\s*/\s*bag\b", text, re.I)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _sku_inner_qty(code: str) -> int | None:
+    """一份 SKU 自己带的数量：4件、60set、30套。不算货号，也不算「10包」。"""
+    text = code or ""
+    m = re.search(r"(\d+)\s*件", text)
     if m:
-        return int(m.group(1)) * int(m.group(2) or 1)
+        return int(m.group(1))
+    m = re.search(r"(\d+)\s*套(?!装)", text)
+    if m:
+        return int(m.group(1))
+    # 60set礼盒装：set 后面是汉字，不能用 \b（汉字也算单词字符）
+    m = re.search(r"(\d+)\s*sets?(?![a-zA-Z])", text, re.I)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d+)\s*(?:pcs?|pieces?)(?![a-zA-Z])", text, re.I)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def sku_coded_piece_count(sku: str) -> int | None:
+    """SKU 写明的总件数。60set*2 → 120；30set+60set → 90；4件*2 → 8。"""
+    parts = parse_sku_components(sku)
+    if not parts:
+        return None
+    total = 0
+    for code, qty in parts:
+        inner = _sku_inner_qty(code)
+        if inner is None:
+            return None
+        total += inner * qty
+    return total if total else None
+
+
+def _sku_pieces_per_set(sku: str) -> int | None:
+    """SKU「4件」或「4件*2」里的 4，是一套的件数。"""
+    return _sku_inner_qty(sku or "")
+
+
+def _bundle_repeat(attr: str, title: str) -> int | None:
+    """规格名把整组括起来再乘 N，如（4-hole+10包）*2。N 是购买组数。"""
+    for src in (attr, title):
+        m = re.search(r"[)）]\s*[*×x]\s*(\d+)\s*$", (src or "").strip(), re.I)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _option_set_count(sku: str, attr: str, title: str) -> int | None:
+    """这一档买了几套。不把标题里的 4 Sets/bag 当成购买套数。"""
+    for src in (attr, title):
+        text = re.sub(r"\d+\s*sets?\s*/\s*(?:bag|pack)\b", " ", src or "", flags=re.I)
+        m = re.search(r"(\d+)\s*sets?\b", text, re.I)
+        if m:
+            return int(m.group(1))
+    for src in (attr, title):
+        m = re.search(r"\*\s*(\d+)\s*$", (src or "").strip())
+        if m:
+            return int(m.group(1))
+    nums = [int(x) for x in re.findall(r"\*(\d+)", sku or "")]
+    if nums and len(set(nums)) == 1 and _sold_as_sets(attr, title):
+        return nums[0]
+    return None
+
+
+def _shared_pieces_per_set(rows: list) -> int | None:
+    """同一商品各规格如果都指向同一个「一套几件」，空白 SKU 也沿用。"""
+    found: list[int] = []
+    for row in rows:
+        n = _pieces_in_one_set(row.attr, row.title, row.product_title)
+        if n is None:
+            n = _sku_pieces_per_set(row.sku)
+        if n is not None:
+            found.append(n)
+    if found and len(set(found)) == 1:
+        return found[0]
+    return None
+
+
+def infer_piece_count(
+    sku: str,
+    attr: str,
+    title: str,
+    product_title: str,
+    pieces_per_set: int | None = None,
+) -> int | None:
+    coded = sku_coded_piece_count(sku)
+    if coded:
+        return coded
+
+    per_set = pieces_per_set or _pieces_in_one_set(attr, title, product_title)
+    set_count = _option_set_count(sku, attr, title)
+    # 页面写了一套有几件时，each 按件：2 Sets × 4 = 8。
+    if per_set and set_count:
+        return per_set * set_count
+
+    # 「（组合）*N」且每个子件都是 *N：each 按这 N 组，不再把子件加成 2N。
+    # 「零件 + 零件, N sets」没有这层括号，仍走下面的零件相加。
+    repeat = _bundle_repeat(attr, title)
+    if repeat and not per_set:
+        grouped = parse_sku_components(sku or "")
+        if grouped and len(grouped) >= 2 and all(q == repeat for _, q in grouped):
+            return repeat
 
     blob = f"{attr} {title}"
     parts = parse_sku_components(sku or "")
@@ -357,6 +489,9 @@ def infer_piece_count(sku: str, attr: str, title: str, product_title: str) -> in
                 xm = re.search(r"(\d+)\s*[x×]", blob, re.I)
                 if xm:
                     total *= int(xm.group(1))
+            # SKU 没写 60set/4件 时，规格名 120 sets 仍按对外套数
+            if set_count and set_count > total:
+                return set_count
             return total
 
     m = re.search(r"(\d+)\s*(?:pcs?|pieces?|units?|packs?)\b", blob, re.I)
@@ -454,6 +589,9 @@ class PricedOffer:
     sku_meta: dict = field(default_factory=dict)
     peers: list = field(default_factory=list)
     standalone_total: Decimal | None = None
+    pieces_per_set: int | None = None
+    each_count: int | None = None
+    each_by_set: bool = False
     currency: str = ""
 
 
@@ -597,6 +735,9 @@ def _fill_standalone_totals(rows: list[PricedOffer]) -> None:
 def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
     rows = _sku_rows(cfg)
     _fill_standalone_totals(rows)
+    shared_per_set = _shared_pieces_per_set(rows)
+    for row in rows:
+        row.pieces_per_set = shared_per_set
     offers: list[PricedOffer] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -621,6 +762,7 @@ def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
                 product_title=row.product_title,
                 location=location,
                 standalone_total=row.standalone_total,
+                pieces_per_set=row.pieces_per_set,
                 currency=row.currency,
             )
         )
@@ -655,7 +797,89 @@ def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
             )
         )
 
+    align_each_counts(offers)
     return offers
+
+
+def _component_total(sku: str) -> int | None:
+    """子件箱数相加。SKU 已写 4件/60set 时不算，避免把 60set*2 收成 2。"""
+    if sku_coded_piece_count(sku):
+        return None
+    parts = parse_sku_components(sku or "")
+    if not parts:
+        return None
+    total = sum(q for _, q in parts)
+    if len(parts) >= 2 or total >= 2:
+        return total
+    return None
+
+
+def _each_matches(price: Decimal | None, count: int | None, claims: list[Decimal]) -> bool:
+    if not count or price is None or not claims:
+        return False
+    actual = price / Decimal(count)
+    return all(money_matches(actual, claimed) for claimed in claims)
+
+
+def align_each_counts(offers: list[PricedOffer]) -> None:
+    """同一链接的 each 用同一种算法。
+
+    先看能分清的规格：若有规格的 each 对得上「一套几件」，整页按件。
+    否则若有规格的套数和件数相同、each 对得上这个数，其余规格也按套数，
+    不再把 A*N+B*N 加成更多件。
+    """
+    rows = []
+    for offer in offers:
+        claims = parse_claim(offer.price_tag).each_prices
+        if not claims or offer.price is None:
+            continue
+        rows.append(
+            (
+                offer,
+                claims,
+                _option_set_count(offer.sku, offer.attr, offer.title),
+                _component_total(offer.sku),
+                infer_piece_count(
+                    offer.sku,
+                    offer.attr,
+                    offer.title,
+                    offer.product_title,
+                    offer.pieces_per_set,
+                ),
+            )
+        )
+    if not rows:
+        return
+
+    has_pack = any(
+        offer.pieces_per_set or _pieces_in_one_set(offer.attr, offer.title, offer.product_title)
+        for offer, *_ in rows
+    )
+    if has_pack and any(
+        _each_matches(offer.price, primary, claims)
+        for offer, claims, _sets, _components, primary in rows
+    ):
+        return
+
+    clear = False
+    component_only = False
+    set_only = False
+    for offer, claims, sets, components, _primary in rows:
+        match_sets = _each_matches(offer.price, sets, claims)
+        match_components = _each_matches(offer.price, components, claims)
+        if sets and components and sets == components and match_sets:
+            clear = True
+        elif match_components and sets and not match_sets:
+            component_only = True
+        elif match_sets and components and components != sets and not match_components:
+            set_only = True
+    if not (clear and set_only and not component_only):
+        return
+
+    for offer, _claims, sets, _components, _primary in rows:
+        if sets:
+            offer.each_count = sets
+            offer.each_by_set = True
 
 
 @dataclass
@@ -734,7 +958,13 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
                 )
 
     if claim.each_prices:
-        pieces = infer_piece_count(offer.sku, offer.attr, offer.title, offer.product_title)
+        pieces = offer.each_count or infer_piece_count(
+            offer.sku,
+            offer.attr,
+            offer.title,
+            offer.product_title,
+            offer.pieces_per_set,
+        )
         if offer.price is None:
             statuses.append(UNCHECKABLE)
             bits.append("有单价文案但缺少现价")
@@ -743,14 +973,35 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
             bits.append(f"有「each」单价但无法从规格推断件数（sku={offer.sku}）")
         else:
             actual = offer.price / Decimal(pieces)
+            set_count = _option_set_count(offer.sku, offer.attr, offer.title)
             for claimed in claim.each_prices:
                 ok = money_matches(actual, claimed)
                 statuses.append(REASONABLE if ok else UNREASONABLE)
                 mark = "符合" if ok else "不符"
-                bits.append(
-                    f"现价{_money(offer.price, symbol=page_sym)}÷{pieces}件={_money(actual, 4, symbol=page_sym)}，"
-                    f"文案{_money(claimed, symbol=claim_sym)}/件（{mark}）"
+                named_sets = bool(
+                    re.search(r"\d+\s*sets?\b", f"{offer.attr or ''} {offer.title or ''}", re.I)
                 )
+                unit = (
+                    "套"
+                    if offer.each_by_set or (named_sets and set_count and pieces == set_count)
+                    else "件"
+                )
+                line = (
+                    f"现价{_money(offer.price, symbol=page_sym)}÷{pieces}{unit}={_money(actual, 4, symbol=page_sym)}，"
+                    f"文案{_money(claimed, symbol=claim_sym)}/{unit}（{mark}）"
+                )
+                if (
+                    not ok
+                    and set_count
+                    and set_count != pieces
+                    and offer.price is not None
+                    and money_matches(offer.price / Decimal(set_count), claimed)
+                ):
+                    line += (
+                        f"；按{set_count}套={_money(offer.price / Decimal(set_count), 4, symbol=page_sym)}，"
+                        "与套单价一致"
+                    )
+                bits.append(line)
 
     if claim.set_prices:
         sets = infer_set_count(offer.sku, offer.attr, offer.title)

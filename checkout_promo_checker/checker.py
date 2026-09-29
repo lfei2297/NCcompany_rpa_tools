@@ -9,6 +9,7 @@ from parser import (
     LOC_LABELS,
     collect_checkout_candidates,
     extract_page_config,
+    has_order_module,
     is_checkout_url,
     looks_like_checkout_config,
 )
@@ -110,10 +111,12 @@ def check_one(raw_url: str) -> CheckResult:
         out.jumped = False
     else:
         candidates = collect_checkout_candidates(final, html, cfg)[:8]
-        if is_checkout_url(final) and final not in candidates:
-            candidates.insert(0, final)
         checkout_url, checkout_html, checkout_cfg, note = _try_fetch_checkout(candidates)
         out.jumped = bool(checkout_url) and (checkout_url.rstrip("/") != source.rstrip("/"))
+        # 一页结账的路径常常不带 checkout，页内也没有另一条结账链接。
+        if not checkout_url and has_order_module(cfg):
+            checkout_url, checkout_html, checkout_cfg = final, html, cfg
+            out.jumped = False
         if not checkout_url:
             out.note = note or "未能跳转到结账页"
             out.system_result = SYS_FAIL

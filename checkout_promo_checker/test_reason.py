@@ -21,7 +21,7 @@ from reason import (
     percent_matches,
     summarize,
 )
-from parser import LOC_BADGE, LOC_HEADER, LOC_PRICE, LOC_SPEC
+from parser import LOC_BADGE, LOC_HEADER, LOC_PRICE, LOC_SPEC, has_order_module
 
 
 def offer(**kwargs):
@@ -51,10 +51,40 @@ def test_parse_and_units():
     c = parse_claim("$38.99/set")
     assert c.set_prices == [Decimal("38.99")]
     assert infer_piece_count("QH2692361-4件*2", "2 Sets", "", "4 Sets/bag") == 8
+    assert infer_piece_count("QH2692361", "2 Sets", "", "4 Sets/bag") == 8
+    assert infer_piece_count("QH2692361*2", "2 Sets", "", "4 Sets/bag") == 8
     assert infer_piece_count("QH2692361-4件", "1 Set (Set of 4)", "", "") == 4
     assert infer_piece_count("FD3096590-1*2+FD3352377-切丝*2", "2× Combo Set", "", "") == 4
     assert infer_piece_count("FD3096590-1+FD3352377-切丝", "Combo Set", "", "") == 2
+    assert infer_piece_count("A+B+C+D", "1 Set (Set of 4)", "", "") == 4
+    # 没写一套有几件时，A*N+B*N 按零件数，不收成 N 套
+    assert infer_piece_count(
+        "TG2452538-套筒加接杆*2+WB3340827-棘轮蓝色手柄*2",
+        "Adjustable sleeve + extension rod + Blue Handle, 2 sets",
+        "",
+        "",
+    ) == 4
+    assert infer_piece_count(
+        "XL3505149A-四孔*2+IP3541886-10包*2",
+        "（4-hole+10 Packs Bait）*2",
+        "",
+        "",
+    ) == 2
     assert infer_set_count("A*2+B*2", "(Style A + Style B) * 2", "") == 2
+    # SKU 写明一份数量则相乘：60set*2 → 120，30set+60set → 90
+    assert infer_piece_count("KC3173821-60set礼盒装*2", "", "", "") == 120
+    assert infer_piece_count(
+        "KC3173821-30set礼盒装+KC3173821-60set礼盒装", "", "", ""
+    ) == 90
+    assert (
+        infer_piece_count(
+            "KC3173821-60set礼盒装*2",
+            "120 sets+Gift Box",
+            "Mini Envelopes With Blank Cards - 120 sets+Gift Box",
+            "Mini Envelopes With Blank Cards",
+        )
+        == 120
+    )
     print("parse ok")
 
 
@@ -99,6 +129,146 @@ def test_percent_and_each():
     )
     assert v.status == "文案不合理", v.detail
     print("percent+each ok")
+
+
+def test_each_stays_per_piece_without_pack_size():
+    v = evaluate_offer(
+        offer(
+            sku="TG2452538-套筒加接杆*2+WB3340827-棘轮蓝色手柄*2",
+            price=Decimal("97.99"),
+            regular=Decimal("195.9"),
+            price_tag="$48.99 each",
+            attr="Adjustable sleeve + extension rod + Blue Handle, 2 sets",
+            title="",
+            product_title="Multi-function Universal Socket Wrench Tool",
+        )
+    )
+    assert v.status == "文案不合理", v.detail
+    assert "÷4件" in v.detail, v.detail
+    assert "按2套" in v.detail and "与套单价一致" in v.detail, v.detail
+    v = evaluate_offer(
+        offer(
+            sku="XL3505149A-四孔*2+IP3541886-10包*2",
+            price=Decimal("62.99"),
+            regular=Decimal("125.9"),
+            price_tag="🔥Only $31.49 each",
+            attr="（4-hole+10 Packs Bait）*2",
+            title="",
+            product_title="Reusable Fly Trap",
+        )
+    )
+    assert v.status == "文案合理", v.detail
+    assert "÷2件" in v.detail, v.detail
+    hose = evaluate_offer(offer())
+    assert "÷8件" in hose.detail, hose.detail
+    bare = evaluate_offer(
+        offer(
+            sku="QH2692361*2",
+            price=Decimal("68.99"),
+            regular=Decimal("137.99"),
+            price_tag="🔥only $8.62 each!",
+            attr="2 Sets",
+            title="2 Sets",
+            product_title="3/4 Inch Garden Hose Quick Connector 4 Sets/bag",
+        )
+    )
+    assert bare.status == "文案合理", bare.detail
+    assert "÷8件" in bare.detail, bare.detail
+    # 同页已有规格的 each 按「2 sets」除尽，组合装也按套数，不再加成 4 件
+    offers = extract_priced_offers(
+        _cfg(
+            [
+                {
+                    "ID": 1,
+                    "price": 62.99,
+                    "regular_price": 125.9,
+                    "attrs": [{"name": "Style", "value": "Adjustable sleeve + extension rod, 2 sets"}],
+                },
+                {
+                    "ID": 2,
+                    "price": 97.99,
+                    "regular_price": 195.9,
+                    "attrs": [
+                        {
+                            "name": "Style",
+                            "value": "Adjustable sleeve + extension rod + Blue Handle, 2 sets",
+                        }
+                    ],
+                },
+            ],
+            [
+                {"ID": 1, "sku": "TG2452538-套筒加接杆*2", "priceTags": "$31.49 each"},
+                {
+                    "ID": 2,
+                    "sku": "TG2452538-套筒加接杆*2+WB3340827-棘轮蓝色手柄*2",
+                    "priceTags": "$48.99 each",
+                },
+            ],
+        )
+    )
+    by_label = {o.label: evaluate_offer(o) for o in offers if o.location == LOC_PRICE}
+    assert by_label["Adjustable sleeve + extension rod, 2 sets"].status == "文案合理"
+    combo = by_label["Adjustable sleeve + extension rod + Blue Handle, 2 sets"]
+    assert combo.status == "文案合理", combo.detail
+    assert "÷2套" in combo.detail, combo.detail
+    # 同页另一档写了 Set of 4，本档 SKU 没有「件」，仍按 2×4
+    offers = extract_priced_offers(
+        _cfg(
+            [
+                {
+                    "ID": 1,
+                    "price": 42.99,
+                    "regular_price": 85.99,
+                    "attrs": [{"name": "Style", "value": "1 Set (Set of 4)"}],
+                },
+                {
+                    "ID": 2,
+                    "price": 68.99,
+                    "regular_price": 137.99,
+                    "attrs": [{"name": "Style", "value": "2 Sets"}],
+                },
+            ],
+            [
+                {"ID": 1, "sku": "QH2692361", "priceTags": "only $10.75 each!"},
+                {"ID": 2, "sku": "QH2692361*2", "priceTags": "only $8.62 each!"},
+            ],
+        )
+    )
+    two = next(o for o in offers if o.label == "2 Sets")
+    v = evaluate_offer(two)
+    assert v.status == "文案合理", v.detail
+    assert "÷8件" in v.detail, v.detail
+    # SKU 60set*2 → 120，each 按 $37.99÷120
+    v = evaluate_offer(
+        offer(
+            sku="KC3173821-60set礼盒装*2",
+            price=Decimal("37.99"),
+            regular=Decimal("75.99"),
+            price_tag="🔥only $0.31 each!",
+            attr="120 sets+Gift Box",
+            title="Mini Envelopes With Blank Cards - 120 sets+Gift Box",
+            product_title="Mini Envelopes With Blank Cards",
+            label="120 sets+Gift Box",
+        )
+    )
+    assert v.status == "文案合理", v.detail
+    assert "÷120套" in v.detail, v.detail
+    assert "÷2件" not in v.detail, v.detail
+    v = evaluate_offer(
+        offer(
+            sku="KC3173821-30set礼盒装+KC3173821-60set礼盒装",
+            price=Decimal("33.99"),
+            regular=Decimal("67.99"),
+            price_tag="only $0.38 each!",
+            attr="90 sets+Gift Box",
+            title="Mini Envelopes With Blank Cards - 90 sets+Gift Box",
+            product_title="Mini Envelopes With Blank Cards",
+            label="90 sets+Gift Box",
+        )
+    )
+    assert v.status == "文案合理", v.detail
+    assert "÷90套" in v.detail, v.detail
+    print("each-as-set ok")
 
 
 def test_set_price():
@@ -449,6 +619,7 @@ def test_header_does_not_veto_page():
             regular=Decimal("55.98"),
             price_tag="Only $13.99 each!",
             attr="Combo Set",
+            title="Combo Set",
             location=LOC_PRICE,
         )
     )
@@ -488,6 +659,13 @@ def test_header_only_new_layout():
     print("header-only ok")
 
 
+def test_inline_checkout_has_order_module():
+    assert has_order_module([{"tag": "order", "_props": []}])
+    assert not has_order_module([{"tag": "header"}, {"tag": "Banner"}])
+    assert not has_order_module(None)
+    print("inline checkout ok")
+
+
 def test_currency_unit_mismatch():
     c = parse_claim("🔥Only $16.66 each")
     assert c.each_prices == [Decimal("16.66")]
@@ -495,8 +673,8 @@ def test_currency_unit_mismatch():
     c = parse_claim("Only €16,66 each")
     assert c.each_prices == [Decimal("16.66")], c.each_prices
     assert c.money_units == ["€"]
-    c = parse_claim("Only €18.49 each")
-    assert c.each_prices == [Decimal("18.49")]
+    c = parse_claim("50% OFF")
+    assert c.money_units == []
 
     common = dict(
         sku="WO2437037-狗粮秤*3",
@@ -510,10 +688,45 @@ def test_currency_unit_mismatch():
     bad = evaluate_offer(offer(price_tag="🔥Only $16.66 each", currency="EUR", **common))
     assert bad.status == "文案不合理", bad.detail
     assert "货币单位不一致" in bad.detail
+    assert "€（EUR）" in bad.detail and "文案货币为$" in bad.detail
+    assert "符合" in bad.detail
 
     good = evaluate_offer(offer(price_tag="🔥Only €16.66 each", currency="EUR", **common))
     assert good.status == "文案合理", good.detail
     assert "不一致" not in good.detail
+    assert "€49.99" in good.detail
+
+    usd = evaluate_offer(offer(price_tag="🔥Only $16.66 each", currency="USD", **common))
+    assert usd.status == "文案合理", usd.detail
+    assert "不一致" not in usd.detail
+
+    aud = evaluate_offer(offer(price_tag="Only $16.66 each", currency="AUD", **common))
+    assert aud.status == "文案合理", aud.detail
+    explicit = evaluate_offer(offer(price_tag="Only US$16.66 each", currency="AUD", **common))
+    assert explicit.status == "文案不合理", explicit.detail
+    assert "货币单位不一致" in explicit.detail
+
+    legacy = evaluate_offer(offer(price_tag="🔥Only $16.66 each", **common))
+    assert legacy.status == "文案合理", legacy.detail
+    assert "不一致" not in legacy.detail
+
+    variants = [
+        {
+            "ID": 1,
+            "title": "3 PCS",
+            "price": "49.99",
+            "regular_price": "98.99",
+            "attrs": [{"value": "3 PCS"}],
+        }
+    ]
+    sku_config = [{"ID": 1, "sku": "WO2437037-狗粮秤*3", "priceTags": "🔥Only $16.66 each"}]
+    cfg = _cfg(variants, sku_config)
+    cfg[0]["_props"][0]["value"]["currency"] = "EUR"
+    offers = extract_priced_offers(cfg)
+    assert offers and offers[0].currency == "EUR"
+    verdict = evaluate_offer(offers[0])
+    assert verdict.status == "文案不合理", verdict.detail
+    assert "货币单位不一致" in verdict.detail
     print("currency mismatch ok")
 
 
@@ -535,6 +748,7 @@ def test_helpers():
 if __name__ == "__main__":
     test_parse_and_units()
     test_hose_each()
+    test_each_stays_per_piece_without_pack_size()
     test_percent_and_each()
     test_set_price()
     test_mismatch()
@@ -545,6 +759,7 @@ if __name__ == "__main__":
     test_bundle_save_vs_singles()
     test_header_does_not_veto_page()
     test_header_only_new_layout()
+    test_inline_checkout_has_order_module()
     test_currency_unit_mismatch()
     test_helpers()
     print("all reason tests ok")
