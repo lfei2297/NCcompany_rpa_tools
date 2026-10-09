@@ -88,6 +88,169 @@ def test_parse_and_units():
     print("parse ok")
 
 
+def test_color_combo_repeat_follows_per_piece_siblings():
+    """(三色)×N：同页单色、三色各 1 已按件，×N 是每种再买 N 个，不是 N 组。"""
+    variants = [
+        {
+            "ID": 1,
+            "price": 22.99,
+            "regular_price": 45.9,
+            "attrs": [{"name": "Style", "value": "Yellow - 2 PCS"}],
+        },
+        {
+            "ID": 2,
+            "price": 26.99,
+            "regular_price": 53.9,
+            "attrs": [{"name": "Style", "value": "Yellow + Orange + Rose Red"}],
+        },
+        {
+            "ID": 3,
+            "price": 32.99,
+            "regular_price": 65.9,
+            "attrs": [{"name": "Style", "value": "(Yellow + Orange + Rose Red) × 2"}],
+        },
+        {
+            "ID": 4,
+            "price": 42.99,
+            "regular_price": 85.9,
+            "attrs": [{"name": "Style", "value": "(Yellow + Orange + Rose Red) × 3"}],
+        },
+    ]
+    sku_config = [
+        {"ID": 1, "sku": "WO3550543A-黄色*2", "priceTags": "$11.49 each"},
+        {
+            "ID": 2,
+            "sku": "WO3550543A-粉色+WO3550543A-黄色+WO3550543A-橙色",
+            "priceTags": "$8.99 each",
+        },
+        {
+            "ID": 3,
+            "sku": "WO3550543A-粉色*2+WO3550543A-黄色*2+WO3550543A-橙色*2",
+            "priceTags": "$5.49 each",
+        },
+        {
+            "ID": 4,
+            "sku": "WO3550543A-粉色*3+WO3550543A-黄色*3+WO3550543A-橙色*3",
+            "priceTags": "$4.77 each",
+        },
+    ]
+    offers = extract_priced_offers(_cfg(variants, sku_config))
+    by_label = {o.label: evaluate_offer(o) for o in offers if o.location == LOC_PRICE}
+    assert by_label["Yellow - 2 PCS"].status == "文案合理"
+    assert "÷2件" in by_label["Yellow - 2 PCS"].detail
+    assert by_label["Yellow + Orange + Rose Red"].status == "文案合理"
+    assert "÷3件" in by_label["Yellow + Orange + Rose Red"].detail
+    doubled = by_label["(Yellow + Orange + Rose Red) × 2"]
+    assert doubled.status == "文案合理", doubled.detail
+    assert "÷6件" in doubled.detail, doubled.detail
+    tripled = by_label["(Yellow + Orange + Rose Red) × 3"]
+    assert tripled.status == "文案合理", tripled.detail
+    assert "÷9件" in tripled.detail, tripled.detail
+
+    # 同页按件的是另一款商品时，括号里的不同零件仍按组，不跟着改
+    mixed = extract_priced_offers(
+        _cfg(
+            [
+                {
+                    "ID": 1,
+                    "price": 22.99,
+                    "regular_price": 45.9,
+                    "attrs": [{"name": "Style", "value": "Yellow - 2 PCS"}],
+                },
+                {
+                    "ID": 2,
+                    "price": 62.99,
+                    "regular_price": 125.9,
+                    "attrs": [{"name": "Style", "value": "（4-hole+10 Packs Bait）*2"}],
+                },
+            ],
+            [
+                {"ID": 1, "sku": "WO3550543A-黄色*2", "priceTags": "$11.49 each"},
+                {
+                    "ID": 2,
+                    "sku": "XL3505149A-四孔*2+IP3541886-10包*2",
+                    "priceTags": "🔥Only $31.49 each",
+                },
+            ],
+        )
+    )
+    trap = next(o for o in mixed if "4-hole" in o.label)
+    verdict = evaluate_offer(trap)
+    assert verdict.status == "文案合理", verdict.detail
+    assert "÷2件" in verdict.detail, verdict.detail
+
+    # 单色没有单价文案也行：货号在本页单独有售，×N 就按件数
+    singles = extract_priced_offers(
+        _cfg(
+            [
+                {
+                    "ID": 1,
+                    "price": 17.99,
+                    "regular_price": 35.9,
+                    "attrs": [{"name": "Style", "value": "Yellow - 1 PC"}],
+                },
+                {
+                    "ID": 2,
+                    "price": 17.99,
+                    "regular_price": 35.9,
+                    "attrs": [{"name": "Style", "value": "Orange - 1 PC"}],
+                },
+                {
+                    "ID": 3,
+                    "price": 17.99,
+                    "regular_price": 35.9,
+                    "attrs": [{"name": "Style", "value": "Rose Red - 1 PC"}],
+                },
+                {
+                    "ID": 4,
+                    "price": 32.99,
+                    "regular_price": 65.9,
+                    "attrs": [{"name": "Style", "value": "(Yellow + Orange + Rose Red) × 2"}],
+                },
+            ],
+            [
+                {"ID": 1, "sku": "WO3550543A-黄色", "priceTags": None},
+                {"ID": 2, "sku": "WO3550543A-橙色", "priceTags": None},
+                {"ID": 3, "sku": "WO3550543A-粉色", "priceTags": None},
+                {
+                    "ID": 4,
+                    "sku": "WO3550543A-粉色*2+WO3550543A-黄色*2+WO3550543A-橙色*2",
+                    "priceTags": "$5.49 each",
+                },
+            ],
+        )
+    )
+    only_bundle = next(o for o in singles if "× 2" in o.label)
+    single_verdict = evaluate_offer(only_bundle)
+    assert single_verdict.status == "文案合理", single_verdict.detail
+    assert "÷6件" in single_verdict.detail, single_verdict.detail
+
+    # 零件没有单卖，页面上只有括号组合：仍按组
+    alone = extract_priced_offers(
+        _cfg(
+            [
+                {
+                    "ID": 1,
+                    "price": 62.99,
+                    "regular_price": 125.9,
+                    "attrs": [{"name": "Style", "value": "（4-hole+10 Packs Bait）*2"}],
+                }
+            ],
+            [
+                {
+                    "ID": 1,
+                    "sku": "XL3505149A-四孔*2+IP3541886-10包*2",
+                    "priceTags": "🔥Only $31.49 each",
+                }
+            ],
+        )
+    )
+    alone_verdict = evaluate_offer(alone[0])
+    assert alone_verdict.status == "文案合理", alone_verdict.detail
+    assert "÷2件" in alone_verdict.detail, alone_verdict.detail
+    print("color combo repeat ok")
+
+
 def test_hose_each():
     v = evaluate_offer(offer())
     assert v.status == "文案合理", v.detail
@@ -747,6 +910,7 @@ def test_helpers():
 
 if __name__ == "__main__":
     test_parse_and_units()
+    test_color_combo_repeat_follows_per_piece_siblings()
     test_hose_each()
     test_each_stays_per_piece_without_pack_size()
     test_percent_and_each()

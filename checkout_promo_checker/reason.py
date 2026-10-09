@@ -797,7 +797,7 @@ def extract_priced_offers(cfg: list | None) -> list[PricedOffer]:
             )
         )
 
-    align_each_counts(offers)
+    align_each_counts(offers, [row.sku for row in rows if row.sku])
     return offers
 
 
@@ -821,12 +821,55 @@ def _each_matches(price: Decimal | None, count: int | None, claims: list[Decimal
     return all(money_matches(actual, claimed) for claimed in claims)
 
 
-def align_each_counts(offers: list[PricedOffer]) -> None:
+def _sku_code_key(code: str) -> str:
+    return re.sub(r"\s+", "", code or "").casefold()
+
+
+def _sku_part_list(sku: str) -> list[tuple[str, int]]:
+    return [
+        (_sku_code_key(code), qty)
+        for code, qty in parse_sku_components(sku or "")
+        if str(code).strip()
+    ]
+
+
+def _parts_sold_as_single_items(sku: str, catalog: list[str]) -> bool:
+    """组合里的货号能在本页单独买到，或另有一档是这些货号各 1 个。"""
+    parts = _sku_part_list(sku)
+    if len(parts) < 2:
+        return False
+    codes = {code for code, _qty in parts}
+    singles: set[str] = set()
+    qty1_combos: list[set[str]] = []
+    for raw in catalog:
+        comp = _sku_part_list(raw)
+        if len(comp) == 1:
+            singles.add(comp[0][0])
+        elif comp and all(qty == 1 for _code, qty in comp):
+            qty1_combos.append({code for code, _qty in comp})
+    if codes <= singles:
+        return True
+    return any(combo == codes for combo in qty1_combos)
+
+
+def _group_repeat_count(offer: PricedOffer) -> int | None:
+    """（组合）×N 且每个子件都是 *N。零件没单卖时按这 N 组。"""
+    repeat = _bundle_repeat(offer.attr, offer.title)
+    if not repeat:
+        return None
+    parts = parse_sku_components(offer.sku or "")
+    if len(parts) >= 2 and all(qty == repeat for _, qty in parts):
+        return repeat
+    return None
+
+
+def align_each_counts(offers: list[PricedOffer], catalog: list[str] | None = None) -> None:
     """同一链接的 each 用同一种算法。
 
     先看能分清的规格：若有规格的 each 对得上「一套几件」，整页按件。
-    否则若有规格的套数和件数相同、each 对得上这个数，其余规格也按套数，
-    不再把 A*N+B*N 加成更多件。
+    否则若有规格的套数和件数相同、each 对得上这个数，其余规格也按套数。
+    （组合）×N 默认按 N 组。这些货号若在本页单独有售，或另有一档各买 1 个，
+    则按子件件数相加。不看文案单价更接近哪一个数。
     """
     rows = []
     for offer in offers:
@@ -873,13 +916,26 @@ def align_each_counts(offers: list[PricedOffer]) -> None:
             component_only = True
         elif match_sets and components and components != sets and not match_components:
             set_only = True
-    if not (clear and set_only and not component_only):
-        return
+    if clear and set_only and not component_only:
+        for offer, _claims, sets, _components, _primary in rows:
+            if sets:
+                offer.each_count = sets
+                offer.each_by_set = True
 
-    for offer, _claims, sets, _components, _primary in rows:
-        if sets:
-            offer.each_count = sets
-            offer.each_by_set = True
+    # （组合）×N 的货号如果本页有单卖，或另有一档各 1 个，×N 就是每种再买 N 个。
+    # 零件从未单卖时仍按组。不拿这一档的文案单价选择组数或件数。
+    sku_catalog = list(catalog or [])
+    sku_catalog.extend(offer.sku for offer, *_rest in rows if offer.sku)
+    for offer, _claims, _sets, components, _primary in rows:
+        repeat = _group_repeat_count(offer)
+        if not repeat or not components or components == repeat:
+            continue
+        label = f"{offer.attr or ''} {offer.title or ''}"
+        if re.search(r"\d+\s*sets?\b", label, re.I):
+            continue
+        if _parts_sold_as_single_items(offer.sku, sku_catalog):
+            offer.each_count = components
+            offer.each_by_set = False
 
 
 @dataclass
