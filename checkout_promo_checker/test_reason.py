@@ -11,6 +11,7 @@ from reason import (
     evaluate_offer,
     extract_priced_offers,
     format_verdict_report,
+    format_verdict_rows,
     infer_piece_count,
     infer_set_count,
     infer_standalone_total,
@@ -893,6 +894,69 @@ def test_currency_unit_mismatch():
     print("currency mismatch ok")
 
 
+def test_calc_table_shows_spec_price():
+    rows = format_verdict_rows([evaluate_offer(offer())])
+    assert rows[0]["price"] == "$68.99", rows[0]
+    assert rows[0]["regular"] == "$132.65", rows[0]
+    assert rows[0]["label"] == "2 Sets"
+
+    euro = evaluate_offer(
+        offer(
+            price=Decimal("16.66"),
+            regular=Decimal("33.32"),
+            currency="EUR",
+            price_tag="Only €16.66 each",
+        )
+    )
+    euro_row = format_verdict_rows([euro])[0]
+    assert euro_row["price"] == "€16.66"
+    assert euro_row["regular"] == "€33.32"
+
+    missing = evaluate_offer(
+        offer(price=None, regular=None, price_tag="Only $8.62 each")
+    )
+    missing_row = format_verdict_rows([missing])[0]
+    assert missing_row["price"] == ""
+    assert missing_row["regular"] == ""
+
+    peer_ok = offer(
+        label="Yellow - 2 PCS",
+        sku="WO3550543A-黄*2",
+        price=Decimal("22.99"),
+        regular=Decimal("45.98"),
+        price_tag="Order in the next 10 minutes and get 50% OFF!",
+        attr="Yellow - 2 PCS",
+        title="Yellow - 2 PCS",
+    )
+    peer_bad = offer(
+        label="Yellow - 3 PCS",
+        sku="WO3550543A-黄*3",
+        price=Decimal("26.99"),
+        regular=Decimal("40.00"),
+        price_tag="Order in the next 10 minutes and get 50% OFF!",
+        attr="Yellow - 3 PCS",
+        title="Yellow - 3 PCS",
+    )
+    header = PricedOffer(
+        index=0,
+        label="整页",
+        sku="",
+        price=None,
+        regular=None,
+        price_tag="Order in the next 10 minutes and get 50% OFF!",
+        attr="",
+        title="",
+        product_title="",
+        location=LOC_HEADER,
+        peers=[peer_ok, peer_bad],
+    )
+    header_rows = format_verdict_rows([evaluate_offer(header)])
+    by_label = {r["label"]: (r["price"], r["regular"]) for r in header_rows}
+    assert by_label["Yellow - 2 PCS"] == ("$22.99", "$45.98"), header_rows
+    assert by_label["Yellow - 3 PCS"] == ("$26.99", "$40.00"), header_rows
+    print("calc table spec price ok")
+
+
 def test_helpers():
     assert money_matches(Decimal("8.62375"), Decimal("8.62"))
     assert percent_matches(Decimal("49.45"), Decimal("49"))
@@ -925,5 +989,6 @@ if __name__ == "__main__":
     test_header_only_new_layout()
     test_inline_checkout_has_order_module()
     test_currency_unit_mismatch()
+    test_calc_table_shows_spec_price()
     test_helpers()
     print("all reason tests ok")

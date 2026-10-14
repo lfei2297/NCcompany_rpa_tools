@@ -180,6 +180,22 @@ def currency_symbol(code: str) -> str:
     }.get((code or "").strip().upper(), "$")
 
 
+def _offer_money_text(value: Decimal | None, currency: str) -> str:
+    if value is None:
+        return ""
+    return _money(value, symbol=currency_symbol(currency))
+
+
+def _offer_price_text(offer: PricedOffer) -> str:
+    """规格当前售价，给测算表「现价」列。没有现价时留空。"""
+    return _offer_money_text(offer.price, offer.currency)
+
+
+def _offer_regular_text(offer: PricedOffer) -> str:
+    """规格划线价，给测算表「原价」列。没有划线价时留空。"""
+    return _offer_money_text(offer.regular, offer.currency)
+
+
 def _norm_unit(token: str) -> str:
     return _UNIT_ALIAS.get(token.upper(), token.upper())
 
@@ -946,6 +962,10 @@ class OfferVerdict:
     detail: str
     location: str = ""
     calc: str = ""
+    price_text: str = ""
+    regular_text: str = ""
+    # 顶栏按规格拆行时，与明细行顺序一致的 (规格名, 现价, 原价)
+    spec_prices: list = field(default_factory=list)
 
 
 def _loc_short(location: str) -> str:
@@ -970,15 +990,26 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
             conflict,
             location=offer.location or LOC_PRICE,
             calc=conflict,
+            price_text=_offer_price_text(offer),
+            regular_text=_offer_regular_text(offer),
         )
     if not claim.has_numeric and not claim.free_shipping:
-        return OfferVerdict(offer.price_tag, offer.label, UNCHECKABLE, "文案没有可测算的价格或折扣数字")
+        return OfferVerdict(
+            offer.price_tag,
+            offer.label,
+            UNCHECKABLE,
+            "文案没有可测算的价格或折扣数字",
+            price_text=_offer_price_text(offer),
+            regular_text=_offer_regular_text(offer),
+        )
     if not claim.has_numeric and claim.free_shipping:
         return OfferVerdict(
             offer.price_tag,
             offer.label,
             NOT_PRICE,
             "仅为包邮/运费文案，不按售价测算",
+            price_text=_offer_price_text(offer),
+            regular_text=_offer_regular_text(offer),
         )
 
     if claim.percents:
@@ -1102,6 +1133,8 @@ def evaluate_offer(offer: PricedOffer) -> OfferVerdict:
         calc,
         location=loc,
         calc=calc,
+        price_text=_offer_price_text(offer),
+        regular_text=_offer_regular_text(offer),
     )
 
 
@@ -1110,6 +1143,9 @@ def _evaluate_header(offer: PricedOffer) -> OfferVerdict:
     match_bits: list[str] = []
     mismatch_bits: list[str] = []
     other_bits: list[str] = []
+    match_prices: list[tuple[str, str]] = []
+    mismatch_prices: list[tuple[str, str]] = []
+    other_prices: list[tuple[str, str]] = []
     statuses: list[str] = []
     for row in offer.peers:
         sub = PricedOffer(
@@ -1129,12 +1165,16 @@ def _evaluate_header(offer: PricedOffer) -> OfferVerdict:
         statuses.append(v.status)
         calc = v.calc or v.detail
         line = f"{row.label}：{calc}"
+        priced = (row.label, _offer_price_text(row), _offer_regular_text(row))
         if v.status == REASONABLE:
             match_bits.append(line)
+            match_prices.append(priced)
         elif v.status == UNREASONABLE:
             mismatch_bits.append(line)
+            mismatch_prices.append(priced)
         else:
             other_bits.append(line)
+            other_prices.append(priced)
 
     if UNREASONABLE in statuses:
         status = UNREASONABLE
@@ -1169,6 +1209,7 @@ def _evaluate_header(offer: PricedOffer) -> OfferVerdict:
         calc,
         location=LOC_HEADER,
         calc=calc,
+        spec_prices=match_prices + mismatch_prices + other_prices,
     )
 
 
@@ -1186,12 +1227,14 @@ def _clean_calc(text: str) -> str:
 
 
 def format_verdict_rows(verdicts: list[OfferVerdict]) -> list[dict]:
-    """拆成表格行：结论、规格、位置、促销文案、测算。"""
+    """拆成表格行：结论、规格、现价、原价、位置、促销文案、测算。"""
     rows: list[dict] = []
     skip = re.compile(r"^\d+个规格|无法完整测算|没有可对照|顶栏折扣仅供参考")
     for v in verdicts:
         if (v.location or "") == LOC_HEADER or v.label == "整页":
             copy = re.sub(r"\s+", " ", v.tag or "").strip()
+            prices = list(v.spec_prices or [])
+            pi = 0
             for line in (v.calc or v.detail or "").splitlines():
                 line = line.strip()
                 if not line or skip.search(line):
@@ -1207,10 +1250,16 @@ def format_verdict_rows(verdicts: list[OfferVerdict]) -> list[dict]:
                     mark = "符合"
                 else:
                     mark = "无法测算"
+                item = prices[pi] if pi < len(prices) else ()
+                price = item[1] if len(item) > 1 else ""
+                regular = item[2] if len(item) > 2 else ""
+                pi += 1
                 rows.append(
                     {
                         "status": mark,
                         "label": lab,
+                        "price": price,
+                        "regular": regular,
                         "location": "顶栏",
                         "copy": copy,
                         "calc": _clean_calc(rest),
@@ -1221,6 +1270,8 @@ def format_verdict_rows(verdicts: list[OfferVerdict]) -> list[dict]:
             {
                 "status": _status_mark(v.status),
                 "label": v.label or "套餐",
+                "price": v.price_text or "",
+                "regular": v.regular_text or "",
                 "location": _loc_short(v.location),
                 "copy": re.sub(r"\s+", " ", v.tag or "").strip(),
                 "calc": _clean_calc(v.calc or v.detail),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 import sys
 from datetime import datetime
@@ -14,6 +15,16 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import streamlit as st
+
+import batch
+import checker
+import reason
+
+# Streamlit 重跑脚本时不会重新加载已导入模块。原价写在 reason.py，
+# 不刷新的话页面会一直用进程启动时的旧逻辑。
+importlib.reload(reason)
+importlib.reload(checker)
+importlib.reload(batch)
 
 from batch import run_batch
 from checker import SYS_CALC_FAIL, SYS_FAIL, SYS_MATCH, SYS_MISMATCH, SYS_NONE, SYS_PURE
@@ -302,6 +313,8 @@ if st.session_state.result_summary:
         for row in rows:
             mark = row.get("status") or ""
             label = row.get("label") or ""
+            price = row.get("price") or ""
+            regular = row.get("regular") or ""
             loc = row.get("location") or ""
             copy = row.get("copy") or ""
             calc = row.get("calc") or ""
@@ -310,6 +323,8 @@ if st.session_state.result_summary:
                 f'data-st="{_esc(mark)}" data-loc="{_esc(loc)}">'
                 f"<td class='{cls.get(mark, 'mark-other')}'>{_esc(mark)}</td>"
                 f"<td>{_esc(label)}</td>"
+                f"<td class='price'>{_esc(price)}</td>"
+                f"<td class='price'>{_esc(regular)}</td>"
                 f"<td>{_esc(loc)}</td>"
                 f"<td>{_esc(copy)}</td>"
                 f"<td>{_esc(calc)}</td>"
@@ -332,7 +347,7 @@ if st.session_state.result_summary:
     width: 100%;
   }}
   .pw table {{
-    width: 100%; min-width: 720px; border-collapse: collapse; table-layout: fixed;
+    width: 100%; min-width: 920px; border-collapse: collapse; table-layout: fixed;
   }}
   .pw thead th {{
     background: #305496; color: #fff; font-weight: 700; text-align: left;
@@ -361,6 +376,7 @@ if st.session_state.result_summary:
     padding: 8px 10px; border: 1px solid #d0d7e2; vertical-align: top; background: #fff;
     word-break: break-word; line-height: 1.45;
   }}
+  .pw td.price {{ white-space: nowrap; }}
   .pw tbody tr:nth-child(even) td {{ background: #f7f9fc; }}
   .mark-ok {{ color: #2e7d32; font-weight: 700; }}
   .mark-bad {{ color: #d32f2f; font-weight: 700; }}
@@ -371,14 +387,18 @@ if st.session_state.result_summary:
 <table>
 <colgroup>
   <col style="width:72px">
-  <col style="width:18%">
+  <col style="width:16%">
+  <col style="width:92px">
+  <col style="width:92px">
   <col style="width:88px">
-  <col style="width:28%">
+  <col style="width:22%">
   <col>
 </colgroup>
 <thead><tr>
 {th("结论", uid + "-p0", st_checks)}
 {th("规格", uid + "-p1", '<input type="text" id="' + uid + '-q1" placeholder="搜索规格">')}
+{th("现价", uid + "-p5", '<input type="text" id="' + uid + '-q4" placeholder="搜索现价">')}
+{th("原价", uid + "-p6", '<input type="text" id="' + uid + '-q5" placeholder="搜索原价">')}
 {th("位置", uid + "-p2", loc_checks)}
 {th("促销文案", uid + "-p3", '<input type="text" id="' + uid + '-q2" placeholder="搜索文案">')}
 {th("测算", uid + "-p4", '<input type="text" id="' + uid + '-q3" placeholder="搜索测算">')}
@@ -404,6 +424,8 @@ if st.session_state.result_summary:
     var q1 = ((document.getElementById('{uid}-q1') || {{}}).value || '').toLowerCase();
     var q2 = ((document.getElementById('{uid}-q2') || {{}}).value || '').toLowerCase();
     var q3 = ((document.getElementById('{uid}-q3') || {{}}).value || '').toLowerCase();
+    var q4 = ((document.getElementById('{uid}-q4') || {{}}).value || '').toLowerCase();
+    var q5 = ((document.getElementById('{uid}-q5') || {{}}).value || '').toLowerCase();
     var trs = document.getElementById('{uid}-body').rows;
     var show = 0;
     for (var i = 0; i < trs.length; i++) {{
@@ -411,8 +433,10 @@ if st.session_state.result_summary:
       if (st.length && st.indexOf(tr.getAttribute('data-st')) < 0) ok = false;
       if (loc.length && loc.indexOf(tr.getAttribute('data-loc')) < 0) ok = false;
       if (q1 && (tds[1].innerText || '').toLowerCase().indexOf(q1) < 0) ok = false;
-      if (q2 && (tds[3].innerText || '').toLowerCase().indexOf(q2) < 0) ok = false;
-      if (q3 && (tds[4].innerText || '').toLowerCase().indexOf(q3) < 0) ok = false;
+      if (q4 && (tds[2].innerText || '').toLowerCase().indexOf(q4) < 0) ok = false;
+      if (q5 && (tds[3].innerText || '').toLowerCase().indexOf(q5) < 0) ok = false;
+      if (q2 && (tds[5].innerText || '').toLowerCase().indexOf(q2) < 0) ok = false;
+      if (q3 && (tds[6].innerText || '').toLowerCase().indexOf(q3) < 0) ok = false;
       tr.style.display = ok ? '' : 'none';
       if (ok) show++;
     }}
