@@ -482,14 +482,18 @@ if st.session_state.result_summary:
         visible = (
             sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
         )
-        # iframe 高度必须一次定死：JS 改 iframe 高度后，Streamlit 外框仍按原高度留白，
-        # 表会被压在顶部并挤在一起。首屏按默认筛出来的行定高。
-        # 结论再勾上「符合」时，顶栏等行仍在表里，外框不能变高，所以允许多出来的行在表内滚动。
+        # iframe 高度必须一次定死：JS 改 iframe 高度后，Streamlit 外框仍按原高度留白。
+        # 规格名和文案会折成两三行，按 48px 估高会把后面的行裁掉，所以按折行高度估，
+        # 超过外框时允许在表内滚动。
         n = max(visible, 1)
-        content_h = 52 + 48 * n + 40
-        max_h = 640
-        height = max(220, min(max_h, content_h))
-        components.html(html, height=height, scrolling=len(rows) > n or content_h > max_h)
+        content_h = 72 + 88 * n
+        max_h = 760
+        height = max(240, min(max_h, content_h))
+        components.html(
+            html,
+            height=height,
+            scrolling=True,
+        )
         return True
 
     def render_group(items: list[dict], expand_first: bool):
