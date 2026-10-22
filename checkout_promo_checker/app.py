@@ -340,19 +340,22 @@ if st.session_state.result_summary:
 
         html = f"""
 <style>
-  html, body {{ margin: 0; padding: 0; background: #fff; overflow: auto; }}
+  html, body {{ margin: 0; padding: 0; background: #fff; height: 100%; overflow: hidden; }}
   * {{ box-sizing: border-box; }}
   .pw {{
     font-family: Calibri, "Microsoft YaHei", sans-serif; font-size: 13px; color: #222;
-    width: 100%;
+    width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;
   }}
+  .pw .sheet {{ flex: 1 1 auto; min-height: 0; overflow: auto; }}
   .pw table {{
-    width: 100%; min-width: 920px; border-collapse: collapse; table-layout: fixed;
+    width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0;
+    table-layout: fixed;
   }}
   .pw thead th {{
     background: #305496; color: #fff; font-weight: 700; text-align: left;
     padding: 0; position: sticky; top: 0; z-index: 5;
     white-space: nowrap; border-right: 1px solid #4a6eab;
+    box-shadow: inset 0 -1px 0 #4a6eab;
   }}
   .pw .th-in {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 6px 8px 10px; gap: 4px; }}
   .pw .arr {{
@@ -385,6 +388,7 @@ if st.session_state.result_summary:
 </style>
 <div class="pw" id="{uid}-wrap">
 <div class="cnt" id="{uid}-cnt"></div>
+<div class="sheet">
 <table>
 <colgroup>
   <col style="width:72px">
@@ -408,6 +412,7 @@ if st.session_state.result_summary:
 {''.join(trs)}
 </tbody>
 </table>
+</div>
 </div>
 <script>
 (function() {{
@@ -489,11 +494,8 @@ if st.session_state.result_summary:
         content_h = 72 + 88 * n
         max_h = 760
         height = max(240, min(max_h, content_h))
-        components.html(
-            html,
-            height=height,
-            scrolling=True,
-        )
+        # 外框不滚动。条数和表头留在滚动区外面，只有数据行在表内滚动。
+        components.html(html, height=height, scrolling=False)
         return True
 
     def render_group(items: list[dict], expand_first: bool):
