@@ -311,10 +311,9 @@ if st.session_state.result_summary:
         visible = (
             sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
         )
-        # 外框按能看见的行数定高，最多大约五行。再多的行在表内滚，
-        # 条数和列表头用 sticky 留在滚动区顶部，不跟整页一起卷走。
+        # 数据区单独限高。列表头放在滚动区外面，滚数据行时表头不动。
         n = max(visible, 1)
-        sheet_h = 42 + min(520, 92 * n)
+        body_h = min(420, 96 * n)
         cls = {"符合": "mark-ok", "不符": "mark-bad", "包邮": "mark-ship"}
         trs = []
         for row in rows:
@@ -353,16 +352,15 @@ if st.session_state.result_summary:
     font-family: Calibri, "Microsoft YaHei", sans-serif; font-size: 13px; color: #222;
     width: 100%;
   }}
-  .pw .sheet {{ max-height: {sheet_h}px; overflow: auto; }}
+  .pw .sheet {{ max-height: {body_h}px; overflow: auto; }}
   .pw table {{
     width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0;
     table-layout: fixed;
   }}
   .pw thead th {{
     background: #305496; color: #fff; font-weight: 700; text-align: left;
-    padding: 0; position: sticky; top: 0; z-index: 5;
+    padding: 0; position: relative; z-index: 5;
     white-space: nowrap; border-right: 1px solid #4a6eab;
-    box-shadow: inset 0 -1px 0 #4a6eab;
   }}
   .pw .th-in {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 6px 8px 10px; gap: 4px; }}
   .pw .arr {{
@@ -395,8 +393,7 @@ if st.session_state.result_summary:
 </style>
 <div class="pw" id="{uid}-wrap">
 <div class="cnt" id="{uid}-cnt"></div>
-<div class="sheet">
-<table>
+<table class="head">
 <colgroup>
   <col style="width:72px">
   <col style="width:16%">
@@ -415,6 +412,18 @@ if st.session_state.result_summary:
 {th("促销文案", uid + "-p3", '<input type="text" id="' + uid + '-q2" placeholder="搜索文案">')}
 {th("测算", uid + "-p4", '<input type="text" id="' + uid + '-q3" placeholder="搜索测算">')}
 </tr></thead>
+</table>
+<div class="sheet" id="{uid}-sheet">
+<table>
+<colgroup>
+  <col style="width:72px">
+  <col style="width:16%">
+  <col style="width:92px">
+  <col style="width:92px">
+  <col style="width:88px">
+  <col style="width:22%">
+  <col>
+</colgroup>
 <tbody id="{uid}-body">
 {''.join(trs)}
 </tbody>
@@ -491,8 +500,8 @@ if st.session_state.result_summary:
 }})();
 </script>
 """
-        # 外框一次定死，不用 JS 改高度。表内自己滚动，表头钉在表的顶部。
-        components.html(html, height=sheet_h + 36, scrolling=False)
+        # 外框一次定死。列表头在滚动区外，只滚数据行。
+        components.html(html, height=body_h + 78, scrolling=False)
         return True
 
     def render_group(items: list[dict], expand_first: bool):
