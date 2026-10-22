@@ -308,6 +308,13 @@ if st.session_state.result_summary:
 
         st_checks = checks(statuses, f"{uid}-st", "不符" if has_bad else None)
         loc_checks = checks(locs, f"{uid}-loc")
+        visible = (
+            sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
+        )
+        # 外框按能看见的行数定高，最多大约五行。再多的行在表内滚，
+        # 条数和列表头用 sticky 留在滚动区顶部，不跟整页一起卷走。
+        n = max(visible, 1)
+        sheet_h = 42 + min(520, 92 * n)
         cls = {"符合": "mark-ok", "不符": "mark-bad", "包邮": "mark-ship"}
         trs = []
         for row in rows:
@@ -340,13 +347,13 @@ if st.session_state.result_summary:
 
         html = f"""
 <style>
-  html, body {{ margin: 0; padding: 0; background: #fff; height: 100%; overflow: hidden; }}
+  html, body {{ margin: 0; padding: 0; background: #fff; overflow: hidden; }}
   * {{ box-sizing: border-box; }}
   .pw {{
     font-family: Calibri, "Microsoft YaHei", sans-serif; font-size: 13px; color: #222;
-    width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;
+    width: 100%;
   }}
-  .pw .sheet {{ flex: 1 1 auto; min-height: 0; overflow: auto; }}
+  .pw .sheet {{ max-height: {sheet_h}px; overflow: auto; }}
   .pw table {{
     width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0;
     table-layout: fixed;
@@ -484,18 +491,8 @@ if st.session_state.result_summary:
 }})();
 </script>
 """
-        visible = (
-            sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
-        )
-        # iframe 高度必须一次定死：JS 改 iframe 高度后，Streamlit 外框仍按原高度留白。
-        # 规格名和文案会折成两三行，按 48px 估高会把后面的行裁掉，所以按折行高度估，
-        # 超过外框时允许在表内滚动。
-        n = max(visible, 1)
-        content_h = 72 + 88 * n
-        max_h = 760
-        height = max(240, min(max_h, content_h))
-        # 外框不滚动。条数和表头留在滚动区外面，只有数据行在表内滚动。
-        components.html(html, height=height, scrolling=False)
+        # 外框一次定死，不用 JS 改高度。表内自己滚动，表头钉在表的顶部。
+        components.html(html, height=sheet_h + 36, scrolling=False)
         return True
 
     def render_group(items: list[dict], expand_first: bool):
