@@ -135,7 +135,7 @@ st.markdown(
 )
 
 st.title("单页促销文案排查")
-st.caption("广告组 / 店铺组共用。系统测算价下方、规格名称、规格标签、顶栏里的促销文案后，仍建议人工扫一眼；包邮等纯文案必须进店核对。测算版本 20260929（SKU 60set*2 按 120）。")
+st.caption("广告组 / 店铺组共用。系统测算价下方、规格名称、规格标签、顶栏里的促销文案后，仍建议人工扫一眼；包邮等纯文案必须进店核对。测算版本 20261022（Each $X；N-piece×N；德文 pro Stück）。")
 
 with st.expander("怎么用", expanded=False):
     st.markdown(
@@ -381,9 +381,10 @@ if st.session_state.result_summary:
   .mark-ok {{ color: #2e7d32; font-weight: 700; }}
   .mark-bad {{ color: #d32f2f; font-weight: 700; }}
   .mark-ship {{ color: #d32f2f; font-weight: 700; }}
-  .pw .cnt {{ color: #666; font-size: 12px; margin: 8px 0 0; }}
+  .pw .cnt {{ color: #666; font-size: 12px; margin: 0 0 6px; }}
 </style>
 <div class="pw" id="{uid}-wrap">
+<div class="cnt" id="{uid}-cnt"></div>
 <table>
 <colgroup>
   <col style="width:72px">
@@ -407,7 +408,6 @@ if st.session_state.result_summary:
 {''.join(trs)}
 </tbody>
 </table>
-<div class="cnt" id="{uid}-cnt"></div>
 </div>
 <script>
 (function() {{
@@ -483,12 +483,13 @@ if st.session_state.result_summary:
             sum(1 for r in rows if r.get("status") == "不符") if has_bad else len(rows)
         )
         # iframe 高度必须一次定死：JS 改 iframe 高度后，Streamlit 外框仍按原高度留白，
-        # 表会被压在顶部并挤在一起。
+        # 表会被压在顶部并挤在一起。首屏按默认筛出来的行定高。
+        # 结论再勾上「符合」时，顶栏等行仍在表里，外框不能变高，所以允许多出来的行在表内滚动。
         n = max(visible, 1)
         content_h = 52 + 48 * n + 40
         max_h = 640
-        height = max(180, min(max_h, content_h))
-        components.html(html, height=height, scrolling=content_h > max_h)
+        height = max(220, min(max_h, content_h))
+        components.html(html, height=height, scrolling=len(rows) > n or content_h > max_h)
         return True
 
     def render_group(items: list[dict], expand_first: bool):

@@ -2,8 +2,10 @@
 
 检测位置：套餐价下方、规格名称、规格标签、顶栏（含价格或折扣时）。
 规则：
-- only $X each / $X/each：现价 ÷ 件数 ≈ 文案单价
+- only $X each / $X/each / Each $X / 德文 nur 8,66 € pro Stück：现价 ÷ 件数 ≈ 文案单价
   （SKU 写明一份数量时相乘：4件*2 → 8；60set*2 → 120；30set+60set → 90）
+  （规格名写了 3-piece / Three-piece 时按这个件数，末尾 *N 再乘：三件套*2 → 6）
+  （规格名里的 N Stück 按 N 件）
 - $X/set：现价 ÷ 套数 ≈ 文案套价
 - N% OFF（价下方 / 顶栏 / 标签）：相对划线价
 - 规格名称里的 Save N% / N% OFF：相对「单独买各规格现价合计」，不是划线价
@@ -314,6 +316,29 @@ def parse_claim(text: str) -> Claim:
     ):
         _push_unique(claim.each_prices, _amount(m.group(1)))
         claim.has_numeric = True
+    # Each $X：each 写在价格前面，如「6 PCS - Each $15.49」
+    for m in re.finditer(
+        rf"\beach\b\s*[:\-–—]?\s*(?:only\s*)?{_CUR_PREFIX}\s*{_AMT}",
+        t,
+        re.I,
+    ):
+        _push_unique(claim.each_prices, _amount(m.group(1)))
+        claim.has_numeric = True
+    for m in re.finditer(
+        rf"\beach\b\s*[:\-–—]?\s*(?:only\s*)?{_AMT}\s*(?:€|£|¥|￥)",
+        t,
+        re.I,
+    ):
+        _push_unique(claim.each_prices, _amount(m.group(1)))
+        claim.has_numeric = True
+    # 德文 nur 8,66 € pro Stück / nur €8,66 pro Stück，等于 only €X each
+    _de_each = r"pro\s+st(?:ück|ueck)\b"
+    for m in re.finditer(rf"(?:nur\s+)?{_AMT}\s*€\s*{_de_each}", t, re.I):
+        _push_unique(claim.each_prices, _amount(m.group(1)))
+        claim.has_numeric = True
+    for m in re.finditer(rf"(?:nur\s+)?€\s*{_AMT}\s*{_de_each}", t, re.I):
+        _push_unique(claim.each_prices, _amount(m.group(1)))
+        claim.has_numeric = True
     for m in re.finditer(
         rf"(?:only\s*)?{_CUR_PREFIX}\s*{_AMT}\s*/\s*set\b",
         t,
@@ -373,6 +398,44 @@ def _sold_as_sets(attr: str, title: str) -> bool:
         if re.search(r"\*\s*\d+\s*$", (src or "").strip()):
             return True
     return False
+
+
+_PIECE_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+
+
+def _written_set_pieces(attr: str, title: str) -> int | None:
+    """规格名写明一套几件：3-piece、3 piece、Three-piece。
+
+    只看规格名。变体 title 常把商品名拼在前面，商品名里的 three-piece
+    不能套到别的规格。6 PCS 仍走后面的件数，这里不认 pcs。
+    """
+    text = (attr or "").strip() or (title or "")
+    if not text:
+        return None
+    m = re.search(r"\b(\d+)\s*-\s*pieces?\b", text, re.I)
+    if m and int(m.group(1)) > 0:
+        return int(m.group(1))
+    m = re.search(r"\b(\d+)\s+pieces?\b", text, re.I)
+    if m and int(m.group(1)) > 0:
+        return int(m.group(1))
+    word = "|".join(_PIECE_WORDS)
+    m = re.search(rf"\b({word})(?:\s*-\s*|\s+)pieces?\b", text, re.I)
+    if m:
+        return _PIECE_WORDS[m.group(1).lower()]
+    return None
 
 
 def _pieces_in_one_set(*texts: str) -> int | None:
@@ -487,6 +550,12 @@ def infer_piece_count(
     if per_set and set_count:
         return per_set * set_count
 
+    # 3-piece / Three-piece 是一套的件数。末尾 *2 表示再买 2 套，按 6 件。
+    # 必须写在「货号*2 收成 2」之前，否则三件套*2 会被当成 2 件。
+    written = _written_set_pieces(attr, title)
+    if written:
+        return written * (set_count or 1)
+
     # 「（组合）*N」且每个子件都是 *N：each 按这 N 组，不再把子件加成 2N。
     # 「零件 + 零件, N sets」没有这层括号，仍走下面的零件相加。
     repeat = _bundle_repeat(attr, title)
@@ -510,7 +579,7 @@ def infer_piece_count(
                 return set_count
             return total
 
-    m = re.search(r"(\d+)\s*(?:pcs?|pieces?|units?|packs?)\b", blob, re.I)
+    m = re.search(r"(\d+)\s*(?:pcs?|pieces?|units?|packs?|st(?:ück|ueck))\b", blob, re.I)
     if m:
         return int(m.group(1))
 

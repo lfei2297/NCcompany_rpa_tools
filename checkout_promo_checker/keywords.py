@@ -23,6 +23,7 @@ PROMO_PATTERNS: list[tuple[str, str]] = [
     ("促销价", r"only\s*\$\s*\d+(?:\.\d+)?"),
     ("促销价", r"(?:was|now)\s*\$\s*\d+(?:\.\d+)?"),
     ("促销价", r"\$\s*\d+(?:\.\d+)?\s*/?\s*(?:each|set|pc|pcs)?"),
+    ("促销价", r"nur\s*(?:€\s*)?\d+(?:[.,]\d+)?\s*€?\s*pro\s+st(?:ück|ueck)"),
     ("折扣词", r"\b\d+\s*%\s*off\b"),
     ("折扣词", r"\bdiscount(?:s)?\b"),
     ("折扣词", r"\bcoupon\b"),

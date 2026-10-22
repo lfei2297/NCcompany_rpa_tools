@@ -967,6 +967,144 @@ def test_helpers():
     assert percent_matches(Decimal("50.49"), Decimal("50"))
     assert percent_matches(Decimal("50.50"), Decimal("51"))
     assert not percent_matches(Decimal("49.45"), Decimal("50"))
+
+
+def test_each_before_price_and_named_piece_set():
+    """Each $X 单价在 each 后面；Three-piece*2 按 3×2 件，不按货号 *2。"""
+    c = parse_claim("🔥🔥6 PCS - Each $15.49")
+    assert c.each_prices == [Decimal("15.49")], c.each_prices
+    assert c.has_numeric
+    c = parse_claim("8 PCS- Each $15.12")
+    assert c.each_prices == [Decimal("15.12")]
+    c = parse_claim("Each: €16,66")
+    assert c.each_prices == [Decimal("16.66")]
+    # 原来的 $X each 不能被拆成两遍
+    c = parse_claim("🔥only $8.62 each!")
+    assert c.each_prices == [Decimal("8.62")]
+
+    six = evaluate_offer(
+        offer(
+            label="🔥🔥6 PCS - Each $15.49",
+            sku="",
+            attr="🔥🔥6 PCS - Each $15.49",
+            title="Solar Light - 🔥🔥6 PCS - Each $15.49",
+            product_title="Solar Light",
+            price=Decimal("92.99"),
+            regular=Decimal("185.99"),
+            price_tag="🔥🔥6 PCS - Each $15.49",
+            location=LOC_SPEC,
+        )
+    )
+    assert six.status == "文案合理", six.detail
+    assert "÷6件" in six.detail
+
+    eight = evaluate_offer(
+        offer(
+            label="8 PCS- Each $15.12",
+            sku="",
+            attr="8 PCS- Each $15.12",
+            title="Solar Light - 8 PCS- Each $15.12",
+            product_title="Solar Light",
+            price=Decimal("120.99"),
+            regular=Decimal("241.99"),
+            price_tag="8 PCS- Each $15.12",
+            location=LOC_SPEC,
+        )
+    )
+    assert eight.status == "文案合理", eight.detail
+    assert "÷8件" in eight.detail
+
+    combo = "Three-piece (850ML+1750ml+3300ml)"
+    assert infer_piece_count("EI3179364-1", combo, "", "") == 3
+    assert infer_piece_count("EI3179364-1*2", combo + "*2", "", "") == 6
+    assert infer_piece_count("X", "3-piece set", "", "") == 3
+    # 商品名里的 three-piece 不套到另一个规格
+    assert infer_piece_count("Y*2", "2 Sets", "Three-piece Box - 2 Sets", "Three-piece Box") == 2
+    # 飞虫诱捕（组合）*2 仍按 2 组
+    assert infer_piece_count(
+        "XL3505149A-四孔*2+IP3541886-10包*2",
+        "（4-hole+10 Packs Bait）*2",
+        "",
+        "",
+    ) == 2
+
+    one_set = evaluate_offer(
+        offer(
+            label=combo,
+            sku="EI3179364-1",
+            attr=combo,
+            title=combo,
+            product_title="",
+            price=Decimal("39.99"),
+            regular=Decimal("79.90"),
+            price_tag="🔥Only $13.33 each!",
+        )
+    )
+    assert one_set.status == "文案合理", one_set.detail
+    assert "÷3件" in one_set.detail
+
+    two_sets = evaluate_offer(
+        offer(
+            label=combo + "*2",
+            sku="EI3179364-1*2",
+            attr=combo + "*2",
+            title=combo + "*2",
+            product_title="",
+            price=Decimal("69.99"),
+            regular=Decimal("139.99"),
+            price_tag="🔥Only $11.66 each!",
+        )
+    )
+    assert two_sets.status == "文案合理", two_sets.detail
+    assert "÷6件" in two_sets.detail
+    print("each-before-price and named piece set ok")
+
+
+def test_german_per_piece():
+    """德文 nur 8,66 € pro Stück 按 only €X each。N Stück 按 N 件。"""
+    c = parse_claim("nur 8,66 € pro Stück")
+    assert c.each_prices == [Decimal("8.66")], c.each_prices
+    assert c.money_units == ["€"]
+    assert is_promo_copy("nur 8,66 € pro Stück")
+    c = parse_claim("nur €7,59 pro Stück")
+    assert c.each_prices == [Decimal("7.59")], c.each_prices
+    # 英文 each 仍只记一次
+    c = parse_claim("Only €16,66 each")
+    assert c.each_prices == [Decimal("16.66")]
+    assert infer_piece_count("LQ2787998-1瓶*3", "3 Stück", "", "") == 3
+    assert infer_piece_count("", "5 Stück", "", "") == 5
+    three = evaluate_offer(
+        offer(
+            label="3 Stück",
+            sku="LQ2787998-1瓶*3",
+            attr="3 Stück",
+            title="3 Stück",
+            product_title="",
+            price=Decimal("31.99"),
+            regular=Decimal("62.70"),
+            price_tag="nur 8,66 € pro Stück",
+            currency="EUR",
+        )
+    )
+    assert three.status == "文案不合理", three.detail
+    assert "÷3件" in three.detail
+    assert "€8.66" in three.detail
+    five = evaluate_offer(
+        offer(
+            label="5 Stück",
+            sku="LQ2787998-1瓶*5",
+            attr="5 Stück",
+            title="5 Stück",
+            product_title="",
+            price=Decimal("52.99"),
+            regular=Decimal("103.90"),
+            price_tag="nur 7,59 € pro Stück",
+            currency="EUR",
+        )
+    )
+    assert five.status == "文案不合理", five.detail
+    assert "÷5件" in five.detail
+    print("german per piece ok")
     assert not percent_matches(Decimal("49.48"), Decimal("50"))
     assert not percent_matches(Decimal("20"), Decimal("50"))
     print("helpers ok")
@@ -990,5 +1128,7 @@ if __name__ == "__main__":
     test_inline_checkout_has_order_module()
     test_currency_unit_mismatch()
     test_calc_table_shows_spec_price()
+    test_each_before_price_and_named_piece_set()
+    test_german_per_piece()
     test_helpers()
     print("all reason tests ok")
