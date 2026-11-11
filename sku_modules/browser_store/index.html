@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; height: 0; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <script>
+      var lastSent = undefined;
+
+      function send(type, data) {
+        var message = { isStreamlitMessage: true, type: type };
+        if (data) {
+          Object.keys(data).forEach(function (key) {
+            message[key] = data[key];
+          });
+        }
+        window.parent.postMessage(message, "*");
+      }
+
+      function publish(value) {
+        var text = value == null ? "" : String(value);
+        if (lastSent === text) {
+          return;
+        }
+        lastSent = text;
+        send("streamlit:setComponentValue", { value: text });
+      }
+
+      function handle(args) {
+        var storageKey = (args && args.storage_key) || "ncsku_lookup_presets_v1";
+        try {
+          if (args && args.action === "write") {
+            localStorage.setItem(storageKey, args.payload || "");
+            publish(args.payload || "");
+          } else {
+            publish(localStorage.getItem(storageKey) || "");
+          }
+        } catch (err) {
+          publish("");
+        }
+        send("streamlit:setFrameHeight", { height: 0 });
+      }
+
+      window.addEventListener("message", function (event) {
+        if (!event.data || event.data.type !== "streamlit:render") {
+          return;
+        }
+        handle(event.data.args || {});
+      });
+
+      send("streamlit:componentReady", { apiVersion: 1 });
+      send("streamlit:setFrameHeight", { height: 0 });
+    </script>
+  </body>
+</html>

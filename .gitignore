@@ -1,0 +1,3 @@
+__pycache__/
+*.pyc
+sku_modules/lookup_presets.json
