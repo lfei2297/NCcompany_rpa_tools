@@ -25,6 +25,12 @@ DOMAIN_MAP = {
     "德国": "marleneede.de",
     "英国": "domisiccounte.com",
     "美国": "specimien.com",
+    "瑞典": "whotefresh.com",
+    "芬兰": "apreciagion.com",
+    "荷兰": "decordealden.com",
+    "意大利": "furniturefiesta.com",
+    "丹麦": "kitchenkitkove.com",
+    "挪威": "mathomearch.com",
 }
 
 # ── 版本名规律校验 ─────────────────────────────────────────────────────────
@@ -233,7 +239,7 @@ def make_template_bytes():
     ws.append(["", "", "", "", "", ""])
     ws.append(["※ 填写说明：", "", "", "", "", ""])
     ws.append(["  SKU 只在每组第1行填写，后面空行自动归入同一分组", "", "", "", "", ""])
-    ws.append(["  国家：法国/德国/英国/美国", "", "", "", "", ""])
+    ws.append(["  国家：法国/德国/英国/美国/瑞典/芬兰/荷兰/意大利/丹麦/挪威", "", "", "", "", ""])
     ws.append(["  素材版本数量填声明数量，素材版本名称每行填一个实际入库版本名", "", "", "", "", ""])
     for col_idx in range(1, 7):
         ws.column_dimensions[get_column_letter(col_idx)].width = 25 if col_idx != 2 else 30
@@ -282,6 +288,12 @@ def run():
         | 德国 | marleneede.de |
         | 英国 | domisiccounte.com |
         | 美国 | specimien.com |
+        | 瑞典 | whotefresh.com |
+        | 芬兰 | apreciagion.com |
+        | 荷兰 | decordealden.com |
+        | 意大利 | furniturefiesta.com |
+        | 丹麦 | kitchenkitkove.com |
+        | 挪威 | mathomearch.com |
         """)
         return
 
